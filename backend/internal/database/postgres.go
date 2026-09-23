@@ -2,21 +2,22 @@ package database
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 
-	"github.com/jackc/pgx/v5"
+	_ "github.com/jackc/pgx/v5/stdlib"
 )
 
-func Connect(databaseURL string) (*pgx.Conn, error) {
-	conn, err := pgx.Connect(context.Background(), databaseURL)
+func Connect(databaseURL string) (*sql.DB, error) {
+	db, err := sql.Open("pgx", databaseURL)
 	if err != nil {
-		return nil, fmt.Errorf("failed to connect to database: %w", err)
+		return nil, fmt.Errorf("failed to open database connection: %w", err)
 	}
 
-	if err := conn.Ping(context.Background()); err != nil {
-		conn.Close(context.Background())
+	if err := db.PingContext(context.Background()); err != nil {
+		db.Close()
 		return nil, fmt.Errorf("failed to ping database: %w", err)
 	}
 
-	return conn, nil
+	return db, nil
 }
