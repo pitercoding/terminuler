@@ -6,7 +6,10 @@ import (
 
 	"github.com/pitercoding/terminuler/internal/config"
 	"github.com/pitercoding/terminuler/internal/database"
+	"github.com/pitercoding/terminuler/internal/handlers"
+	"github.com/pitercoding/terminuler/internal/repositories"
 	"github.com/pitercoding/terminuler/internal/routes"
+	"github.com/pitercoding/terminuler/internal/services"
 )
 
 func main() {
@@ -27,7 +30,20 @@ func main() {
 
 	mux := http.NewServeMux()
 
-	routes.RegisterRoutes(mux)
+	appointmentRepository := repositories.NewAppointmentRepository(db)
+
+	appointmentService := services.NewAppointmentService(
+		appointmentRepository,
+	)
+
+	appointmentHandler := handlers.NewAppointmentHandler(
+		appointmentService,
+	)
+
+	routes.RegisterRoutes(
+		mux,
+		appointmentHandler,
+	)
 
 	log.Println("Terminuler API running on http://localhost:8080")
 
