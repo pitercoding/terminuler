@@ -3,10 +3,14 @@ package repositories
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/pitercoding/terminuler/internal/models"
 )
+
+var ErrAppointmentConflict = errors.New("appointment slot is already booked")
 
 type AppointmentRepository struct {
 	db *sql.DB
@@ -105,6 +109,12 @@ func (r *AppointmentRepository) Create(
 	)
 
 	if err != nil {
+		var pgError *pgconn.PgError
+
+		if errors.As(err, &pgError) && pgError.Code == "23505" {
+			return ErrAppointmentConflict
+		}
+
 		return fmt.Errorf("failed to create appointment: %w", err)
 	}
 
