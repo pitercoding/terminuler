@@ -115,20 +115,10 @@ func (s *AppointmentService) Create(
 		return nil, fmt.Errorf("failed to parse appointment date: %w", err)
 	}
 
-	startTime, err := time.Parse("15:04", input.StartTime)
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse start time: %w", err)
-	}
-
-	endTime, err := time.Parse("15:04", input.EndTime)
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse end time: %w", err)
-	}
-
 	appointment := &models.Appointment{
 		AppointmentDate: appointmentDate,
-		StartTime:       startTime,
-		EndTime:         endTime,
+		StartTime:       input.StartTime,
+		EndTime:         input.EndTime,
 		CustomerName:    strings.TrimSpace(input.CustomerName),
 		CustomerPhone:   strings.TrimSpace(input.CustomerPhone),
 		CustomerEmail:   strings.TrimSpace(input.CustomerEmail),
@@ -139,6 +129,14 @@ func (s *AppointmentService) Create(
 	}
 
 	return appointment, nil
+}
+
+func normalizeTime(value string) string {
+	if len(value) >= 5 {
+		return value[:5]
+	}
+
+	return value
 }
 
 func (s *AppointmentService) GetAvailableSlots(
@@ -163,8 +161,8 @@ func (s *AppointmentService) GetAvailableSlots(
 	bookedSlots := make(map[string]bool)
 
 	for _, appointment := range appointments {
-		slot := appointment.StartTime.Format("15:04")
-		bookedSlots[slot] = true
+		startTime := normalizeTime(appointment.StartTime)
+		bookedSlots[startTime] = true
 	}
 
 	var availableSlots []AvailableSlot

@@ -57,11 +57,17 @@ func TestGetAvailableSlots_WeekdayWithoutAppointments(t *testing.T) {
 	}
 
 	if slots[0].StartTime != "08:00" {
-		t.Errorf("expected first slot to start at 08:00, got %s", slots[0].StartTime)
+		t.Errorf(
+			"expected first slot to start at 08:00, got %s",
+			slots[0].StartTime,
+		)
 	}
 
 	if slots[7].StartTime != "15:00" {
-		t.Errorf("expected last slot to start at 15:00, got %s", slots[7].StartTime)
+		t.Errorf(
+			"expected last slot to start at 15:00, got %s",
+			slots[7].StartTime,
+		)
 	}
 }
 
@@ -115,38 +121,16 @@ func TestGetAvailableSlots_WithBookedAppointment(t *testing.T) {
 		time.UTC,
 	)
 
-	startTime := time.Date(
-		2026,
-		time.September,
-		28,
-		10,
-		0,
-		0,
-		0,
-		time.UTC,
-	)
-
-	endTime := time.Date(
-		2026,
-		time.September,
-		28,
-		11,
-		0,
-		0,
-		0,
-		time.UTC,
-	)
-
 	repository := &mockAppointmentRepository{
 		appointments: []models.Appointment{
 			{
 				ID:              1,
 				AppointmentDate: appointmentDate,
-				StartTime:       startTime,
-				EndTime:         endTime,
-				CustomerName:    "Racha Cuca",
-				CustomerPhone:   "+5511999999999",
-				CustomerEmail:   "rc@exemple.com",
+				StartTime:       "10:00:00",
+				EndTime:         "11:00:00",
+				CustomerName:    "Test Customer",
+				CustomerPhone:   "+4915112345678",
+				CustomerEmail:   "test@example.com",
 			},
 		},
 	}
@@ -447,17 +431,17 @@ func TestCreateAppointment_Success(t *testing.T) {
 		)
 	}
 
-	if appointment.StartTime.Hour() != 10 {
+	if appointment.StartTime != "10:00" {
 		t.Errorf(
 			"expected start time 10:00, got %s",
-			appointment.StartTime.Format("15:04"),
+			appointment.StartTime,
 		)
 	}
 
-	if appointment.EndTime.Hour() != 11 {
+	if appointment.EndTime != "11:00" {
 		t.Errorf(
 			"expected end time 11:00, got %s",
-			appointment.EndTime.Format("15:04"),
+			appointment.EndTime,
 		)
 	}
 }

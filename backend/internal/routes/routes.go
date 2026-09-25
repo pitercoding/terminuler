@@ -16,4 +16,9 @@ func RegisterRoutes(
 		"/appointments/availability",
 		appointmentHandler.GetAvailability,
 	)
+
+	mux.HandleFunc(
+		"/appointments",
+		appointmentHandler.CreateAppointment,
+	)
 }
