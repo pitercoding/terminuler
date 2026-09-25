@@ -2,7 +2,9 @@ package handlers
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -14,14 +16,20 @@ import (
 )
 
 type mockAppointmentRepository struct {
-	err error
+	appointments []models.Appointment
+	getByDateErr error
+	err          error
 }
 
 func (m *mockAppointmentRepository) GetByDate(
 	ctx context.Context,
 	date string,
 ) ([]models.Appointment, error) {
-	return nil, nil
+	if m.getByDateErr != nil {
+		return nil, m.getByDateErr
+	}
+
+	return m.appointments, nil
 }
 
 func (m *mockAppointmentRepository) Create(
@@ -254,10 +262,341 @@ func TestCreateAppointment_RepositoryError(t *testing.T) {
 		request,
 	)
 
+	if recorder.Code != http.StatusInternalServerError {
+		t.Fatalf(
+			"expected status %d, got %d",
+			http.StatusInternalServerError,
+			recorder.Code,
+		)
+	}
+
+	if strings.Contains(
+		recorder.Body.String(),
+		"database connection failed",
+	) {
+		t.Fatalf(
+			"expected internal error details to be hidden, got %s",
+			recorder.Body.String(),
+		)
+	}
+}
+
+func TestCreateAppointment_ValidationErrorMessage(t *testing.T) {
+	repository := &mockAppointmentRepository{}
+
+	service := services.NewAppointmentService(repository)
+
+	handler := NewAppointmentHandler(service)
+
+	body := `{
+		"appointment_date": "2026-09-26",
+		"start_time": "10:00",
+		"end_time": "11:00",
+		"customer_name": "Racha Cuca",
+		"customer_phone": "+5511999999999",
+		"customer_email": "rc@exemple.com"
+	}`
+
+	request := httptest.NewRequest(
+		http.MethodPost,
+		"/appointments",
+		strings.NewReader(body),
+	)
+
+	recorder := httptest.NewRecorder()
+
+	handler.CreateAppointment(
+		recorder,
+		request,
+	)
+
 	if recorder.Code != http.StatusBadRequest {
 		t.Fatalf(
 			"expected status %d, got %d",
 			http.StatusBadRequest,
+			recorder.Code,
+		)
+	}
+
+	if !strings.Contains(
+		recorder.Body.String(),
+		"appointments are not available on weekends",
+	) {
+		t.Fatalf(
+			"expected validation message in response, got %s",
+			recorder.Body.String(),
+		)
+	}
+}
+
+func TestCreateAppointment_BodyTooLarge(t *testing.T) {
+	repository := &mockAppointmentRepository{}
+
+	service := services.NewAppointmentService(repository)
+
+	handler := NewAppointmentHandler(service)
+
+	body := `{"customer_name": "` +
+		strings.Repeat("a", maxRequestBodyBytes) +
+		`"}`
+
+	request := httptest.NewRequest(
+		http.MethodPost,
+		"/appointments",
+		strings.NewReader(body),
+	)
+
+	recorder := httptest.NewRecorder()
+
+	handler.CreateAppointment(
+		recorder,
+		request,
+	)
+
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf(
+			"expected status %d, got %d",
+			http.StatusBadRequest,
+			recorder.Code,
+		)
+	}
+}
+
+func TestGetAvailability_Success(t *testing.T) {
+	repository := &mockAppointmentRepository{
+		appointments: []models.Appointment{
+			{
+				StartTime: "10:00:00",
+				EndTime:   "11:00:00",
+			},
+		},
+	}
+
+	service := services.NewAppointmentService(repository)
+
+	handler := NewAppointmentHandler(service)
+
+	request := httptest.NewRequest(
+		http.MethodGet,
+		"/appointments/availability?date=2026-09-28",
+		nil,
+	)
+
+	recorder := httptest.NewRecorder()
+
+	handler.GetAvailability(
+		recorder,
+		request,
+	)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf(
+			"expected status %d, got %d",
+			http.StatusOK,
+			recorder.Code,
+		)
+	}
+
+	var response struct {
+		Date           string                   `json:"date"`
+		AvailableSlots []services.AvailableSlot `json:"available_slots"`
+	}
+
+	if err := json.NewDecoder(recorder.Body).Decode(&response); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+
+	if response.Date != "2026-09-28" {
+		t.Errorf("expected date 2026-09-28, got %s", response.Date)
+	}
+
+	if len(response.AvailableSlots) != 7 {
+		t.Fatalf(
+			"expected 7 available slots, got %d",
+			len(response.AvailableSlots),
+		)
+	}
+
+	for _, slot := range response.AvailableSlots {
+		if slot.StartTime == "10:00" {
+			t.Error("expected 10:00 slot to be unavailable")
+		}
+	}
+}
+
+func TestGetAvailability_FullyBookedReturnsEmptyList(t *testing.T) {
+	var appointments []models.Appointment
+
+	for hour := 8; hour < 16; hour++ {
+		appointments = append(appointments, models.Appointment{
+			StartTime: fmt.Sprintf("%02d:00:00", hour),
+			EndTime:   fmt.Sprintf("%02d:00:00", hour+1),
+		})
+	}
+
+	repository := &mockAppointmentRepository{
+		appointments: appointments,
+	}
+
+	service := services.NewAppointmentService(repository)
+
+	handler := NewAppointmentHandler(service)
+
+	request := httptest.NewRequest(
+		http.MethodGet,
+		"/appointments/availability?date=2026-09-28",
+		nil,
+	)
+
+	recorder := httptest.NewRecorder()
+
+	handler.GetAvailability(
+		recorder,
+		request,
+	)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf(
+			"expected status %d, got %d",
+			http.StatusOK,
+			recorder.Code,
+		)
+	}
+
+	if !strings.Contains(
+		recorder.Body.String(),
+		`"available_slots":[]`,
+	) {
+		t.Fatalf(
+			"expected empty available slots list, got %s",
+			recorder.Body.String(),
+		)
+	}
+}
+
+func TestGetAvailability_MissingDate(t *testing.T) {
+	repository := &mockAppointmentRepository{}
+
+	service := services.NewAppointmentService(repository)
+
+	handler := NewAppointmentHandler(service)
+
+	request := httptest.NewRequest(
+		http.MethodGet,
+		"/appointments/availability",
+		nil,
+	)
+
+	recorder := httptest.NewRecorder()
+
+	handler.GetAvailability(
+		recorder,
+		request,
+	)
+
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf(
+			"expected status %d, got %d",
+			http.StatusBadRequest,
+			recorder.Code,
+		)
+	}
+}
+
+func TestGetAvailability_InvalidDate(t *testing.T) {
+	repository := &mockAppointmentRepository{}
+
+	service := services.NewAppointmentService(repository)
+
+	handler := NewAppointmentHandler(service)
+
+	request := httptest.NewRequest(
+		http.MethodGet,
+		"/appointments/availability?date=28-09-2026",
+		nil,
+	)
+
+	recorder := httptest.NewRecorder()
+
+	handler.GetAvailability(
+		recorder,
+		request,
+	)
+
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf(
+			"expected status %d, got %d",
+			http.StatusBadRequest,
+			recorder.Code,
+		)
+	}
+}
+
+func TestGetAvailability_RepositoryError(t *testing.T) {
+	repository := &mockAppointmentRepository{
+		getByDateErr: errors.New("database connection failed"),
+	}
+
+	service := services.NewAppointmentService(repository)
+
+	handler := NewAppointmentHandler(service)
+
+	request := httptest.NewRequest(
+		http.MethodGet,
+		"/appointments/availability?date=2026-09-28",
+		nil,
+	)
+
+	recorder := httptest.NewRecorder()
+
+	handler.GetAvailability(
+		recorder,
+		request,
+	)
+
+	if recorder.Code != http.StatusInternalServerError {
+		t.Fatalf(
+			"expected status %d, got %d",
+			http.StatusInternalServerError,
+			recorder.Code,
+		)
+	}
+
+	if strings.Contains(
+		recorder.Body.String(),
+		"database connection failed",
+	) {
+		t.Fatalf(
+			"expected internal error details to be hidden, got %s",
+			recorder.Body.String(),
+		)
+	}
+}
+
+func TestGetAvailability_MethodNotAllowed(t *testing.T) {
+	repository := &mockAppointmentRepository{}
+
+	service := services.NewAppointmentService(repository)
+
+	handler := NewAppointmentHandler(service)
+
+	request := httptest.NewRequest(
+		http.MethodPost,
+		"/appointments/availability?date=2026-09-28",
+		nil,
+	)
+
+	recorder := httptest.NewRecorder()
+
+	handler.GetAvailability(
+		recorder,
+		request,
+	)
+
+	if recorder.Code != http.StatusMethodNotAllowed {
+		t.Fatalf(
+			"expected status %d, got %d",
+			http.StatusMethodNotAllowed,
 			recorder.Code,
 		)
 	}

@@ -3,15 +3,19 @@ package services
 import (
 	"context"
 	"errors"
+	"fmt"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/pitercoding/terminuler/internal/models"
+	"github.com/pitercoding/terminuler/internal/repositories"
 )
 
 type mockAppointmentRepository struct {
 	appointments []models.Appointment
 	err          error
+	createCalled bool
 }
 
 func (m *mockAppointmentRepository) GetByDate(
@@ -29,6 +33,8 @@ func (m *mockAppointmentRepository) Create(
 	ctx context.Context,
 	appointment *models.Appointment,
 ) error {
+	m.createCalled = true
+
 	if m.err != nil {
 		return m.err
 	}
@@ -362,6 +368,150 @@ func TestValidateCreateAppointment(t *testing.T) {
 			},
 			expectError: true,
 		},
+		{
+			name: "valid first slot of the day",
+			input: CreateAppointmentInput{
+				AppointmentDate: "2026-09-28",
+				StartTime:       "08:00",
+				EndTime:         "09:00",
+				CustomerName:    "Racha Cuca",
+				CustomerPhone:   "+5511999999999",
+				CustomerEmail:   "rc@exemple.com",
+			},
+			expectError: false,
+		},
+		{
+			name: "valid last slot of the day",
+			input: CreateAppointmentInput{
+				AppointmentDate: "2026-09-28",
+				StartTime:       "15:00",
+				EndTime:         "16:00",
+				CustomerName:    "Racha Cuca",
+				CustomerPhone:   "+5511999999999",
+				CustomerEmail:   "rc@exemple.com",
+			},
+			expectError: false,
+		},
+		{
+			name: "end time before start time",
+			input: CreateAppointmentInput{
+				AppointmentDate: "2026-09-28",
+				StartTime:       "11:00",
+				EndTime:         "10:00",
+				CustomerName:    "Racha Cuca",
+				CustomerPhone:   "+5511999999999",
+				CustomerEmail:   "rc@exemple.com",
+			},
+			expectError: true,
+		},
+		{
+			name: "invalid start time format",
+			input: CreateAppointmentInput{
+				AppointmentDate: "2026-09-28",
+				StartTime:       "10h",
+				EndTime:         "11:00",
+				CustomerName:    "Racha Cuca",
+				CustomerPhone:   "+5511999999999",
+				CustomerEmail:   "rc@exemple.com",
+			},
+			expectError: true,
+		},
+		{
+			name: "invalid end time format",
+			input: CreateAppointmentInput{
+				AppointmentDate: "2026-09-28",
+				StartTime:       "10:00",
+				EndTime:         "",
+				CustomerName:    "Racha Cuca",
+				CustomerPhone:   "+5511999999999",
+				CustomerEmail:   "rc@exemple.com",
+			},
+			expectError: true,
+		},
+		{
+			name: "non-existent date",
+			input: CreateAppointmentInput{
+				AppointmentDate: "2026-02-30",
+				StartTime:       "10:00",
+				EndTime:         "11:00",
+				CustomerName:    "Racha Cuca",
+				CustomerPhone:   "+5511999999999",
+				CustomerEmail:   "rc@exemple.com",
+			},
+			expectError: true,
+		},
+		{
+			name: "whitespace-only customer name",
+			input: CreateAppointmentInput{
+				AppointmentDate: "2026-09-28",
+				StartTime:       "10:00",
+				EndTime:         "11:00",
+				CustomerName:    "   ",
+				CustomerPhone:   "+5511999999999",
+				CustomerEmail:   "rc@exemple.com",
+			},
+			expectError: true,
+		},
+		{
+			name: "email with display name",
+			input: CreateAppointmentInput{
+				AppointmentDate: "2026-09-28",
+				StartTime:       "10:00",
+				EndTime:         "11:00",
+				CustomerName:    "Racha Cuca",
+				CustomerPhone:   "+5511999999999",
+				CustomerEmail:   "Racha Cuca <rc@exemple.com>",
+			},
+			expectError: true,
+		},
+		{
+			name: "customer name too long",
+			input: CreateAppointmentInput{
+				AppointmentDate: "2026-09-28",
+				StartTime:       "10:00",
+				EndTime:         "11:00",
+				CustomerName:    strings.Repeat("a", 256),
+				CustomerPhone:   "+5511999999999",
+				CustomerEmail:   "rc@exemple.com",
+			},
+			expectError: true,
+		},
+		{
+			name: "customer name with multibyte characters at limit",
+			input: CreateAppointmentInput{
+				AppointmentDate: "2026-09-28",
+				StartTime:       "10:00",
+				EndTime:         "11:00",
+				CustomerName:    strings.Repeat("ã", 255),
+				CustomerPhone:   "+5511999999999",
+				CustomerEmail:   "rc@exemple.com",
+			},
+			expectError: false,
+		},
+		{
+			name: "customer phone too long",
+			input: CreateAppointmentInput{
+				AppointmentDate: "2026-09-28",
+				StartTime:       "10:00",
+				EndTime:         "11:00",
+				CustomerName:    "Racha Cuca",
+				CustomerPhone:   strings.Repeat("1", 51),
+				CustomerEmail:   "rc@exemple.com",
+			},
+			expectError: true,
+		},
+		{
+			name: "customer email too long",
+			input: CreateAppointmentInput{
+				AppointmentDate: "2026-09-28",
+				StartTime:       "10:00",
+				EndTime:         "11:00",
+				CustomerName:    "Racha Cuca",
+				CustomerPhone:   "+5511999999999",
+				CustomerEmail:   strings.Repeat("a", 250) + "@x.com",
+			},
+			expectError: true,
+		},
 	}
 
 	for _, tt := range tests {
@@ -374,6 +524,12 @@ func TestValidateCreateAppointment(t *testing.T) {
 
 			if !tt.expectError && err != nil {
 				t.Fatalf("expected no error, got %v", err)
+			}
+
+			var validationError *ValidationError
+
+			if tt.expectError && !errors.As(err, &validationError) {
+				t.Fatalf("expected a ValidationError, got %T", err)
 			}
 		})
 	}
@@ -471,6 +627,160 @@ func TestCreateAppointment_ValidationError(t *testing.T) {
 
 	if appointment != nil {
 		t.Fatal("expected nil appointment, got an appointment")
+	}
+
+	if repository.createCalled {
+		t.Fatal("expected repository not to be called on validation error")
+	}
+}
+
+func TestCreateAppointment_ConflictError(t *testing.T) {
+	repository := &mockAppointmentRepository{
+		err: repositories.ErrAppointmentConflict,
+	}
+
+	service := NewAppointmentService(repository)
+
+	input := CreateAppointmentInput{
+		AppointmentDate: "2026-09-28",
+		StartTime:       "10:00",
+		EndTime:         "11:00",
+		CustomerName:    "Racha Cuca",
+		CustomerPhone:   "+5511999999999",
+		CustomerEmail:   "rc@exemple.com",
+	}
+
+	_, err := service.Create(
+		context.Background(),
+		input,
+	)
+
+	if !errors.Is(err, repositories.ErrAppointmentConflict) {
+		t.Fatalf("expected ErrAppointmentConflict, got %v", err)
+	}
+}
+
+func TestCreateAppointment_ParsesAppointmentDate(t *testing.T) {
+	repository := &mockAppointmentRepository{}
+
+	service := NewAppointmentService(repository)
+
+	input := CreateAppointmentInput{
+		AppointmentDate: "2026-09-28",
+		StartTime:       "10:00",
+		EndTime:         "11:00",
+		CustomerName:    "Racha Cuca",
+		CustomerPhone:   "+5511999999999",
+		CustomerEmail:   "rc@exemple.com",
+	}
+
+	appointment, err := service.Create(
+		context.Background(),
+		input,
+	)
+
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+
+	expectedDate := time.Date(2026, time.September, 28, 0, 0, 0, 0, time.UTC)
+
+	if !appointment.AppointmentDate.Equal(expectedDate) {
+		t.Errorf(
+			"expected appointment date %v, got %v",
+			expectedDate,
+			appointment.AppointmentDate,
+		)
+	}
+}
+
+func TestGetAvailableSlots_FullyBooked(t *testing.T) {
+	var appointments []models.Appointment
+
+	for hour := 8; hour < 16; hour++ {
+		appointments = append(appointments, models.Appointment{
+			StartTime: fmt.Sprintf("%02d:00:00", hour),
+			EndTime:   fmt.Sprintf("%02d:00:00", hour+1),
+		})
+	}
+
+	repository := &mockAppointmentRepository{
+		appointments: appointments,
+	}
+
+	service := NewAppointmentService(repository)
+
+	slots, err := service.GetAvailableSlots(
+		context.Background(),
+		"2026-09-28",
+	)
+
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+
+	if slots == nil {
+		t.Fatal("expected empty slice, got nil")
+	}
+
+	if len(slots) != 0 {
+		t.Fatalf("expected 0 available slots, got %d", len(slots))
+	}
+}
+
+func TestGetAvailableSlots_SlotEndTimes(t *testing.T) {
+	repository := &mockAppointmentRepository{}
+
+	service := NewAppointmentService(repository)
+
+	slots, err := service.GetAvailableSlots(
+		context.Background(),
+		"2026-09-28",
+	)
+
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+
+	for _, slot := range slots {
+		start, _ := time.Parse("15:04", slot.StartTime)
+		end, _ := time.Parse("15:04", slot.EndTime)
+
+		if end.Sub(start) != time.Hour {
+			t.Errorf(
+				"expected slot %s-%s to last one hour",
+				slot.StartTime,
+				slot.EndTime,
+			)
+		}
+	}
+}
+
+func TestGetAvailableSlots_ErrorTypes(t *testing.T) {
+	var validationError *ValidationError
+
+	service := NewAppointmentService(&mockAppointmentRepository{})
+
+	_, err := service.GetAvailableSlots(
+		context.Background(),
+		"invalid",
+	)
+
+	if !errors.As(err, &validationError) {
+		t.Fatalf("expected ValidationError for invalid date, got %T", err)
+	}
+
+	service = NewAppointmentService(&mockAppointmentRepository{
+		err: errors.New("database connection failed"),
+	})
+
+	_, err = service.GetAvailableSlots(
+		context.Background(),
+		"2026-09-28",
+	)
+
+	if errors.As(err, &validationError) {
+		t.Fatal("expected repository error not to be a ValidationError")
 	}
 }
 

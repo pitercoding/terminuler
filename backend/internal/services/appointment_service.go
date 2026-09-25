@@ -6,6 +6,7 @@ import (
 	"net/mail"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/pitercoding/terminuler/internal/models"
 )
@@ -29,6 +30,28 @@ type CreateAppointmentInput struct {
 	CustomerEmail   string
 }
 
+// Maximum lengths mirror the VARCHAR columns of the appointments table.
+const (
+	maxCustomerNameLength  = 255
+	maxCustomerPhoneLength = 50
+	maxCustomerEmailLength = 255
+)
+
+// ValidationError indicates that the input provided by the client is invalid.
+type ValidationError struct {
+	Message string
+}
+
+func (e *ValidationError) Error() string {
+	return e.Message
+}
+
+func newValidationError(message string) error {
+	return &ValidationError{
+		Message: message,
+	}
+}
+
 type AppointmentService struct {
 	repository AppointmentRepository
 }
@@ -44,56 +67,74 @@ func NewAppointmentService(
 func (s *AppointmentService) ValidateCreateAppointment(
 	input CreateAppointmentInput,
 ) error {
-	if strings.TrimSpace(input.CustomerName) == "" {
-		return fmt.Errorf("customer name is required")
+	customerName := strings.TrimSpace(input.CustomerName)
+	customerPhone := strings.TrimSpace(input.CustomerPhone)
+	customerEmail := strings.TrimSpace(input.CustomerEmail)
+
+	if customerName == "" {
+		return newValidationError("customer name is required")
 	}
 
-	if strings.TrimSpace(input.CustomerPhone) == "" {
-		return fmt.Errorf("customer phone is required")
+	if utf8.RuneCountInString(customerName) > maxCustomerNameLength {
+		return newValidationError("customer name must have at most 255 characters")
 	}
 
-	if strings.TrimSpace(input.CustomerEmail) == "" {
-		return fmt.Errorf("customer email is required")
+	if customerPhone == "" {
+		return newValidationError("customer phone is required")
 	}
 
-	if _, err := mail.ParseAddress(input.CustomerEmail); err != nil {
-		return fmt.Errorf("invalid customer email")
+	if utf8.RuneCountInString(customerPhone) > maxCustomerPhoneLength {
+		return newValidationError("customer phone must have at most 50 characters")
+	}
+
+	if customerEmail == "" {
+		return newValidationError("customer email is required")
+	}
+
+	if utf8.RuneCountInString(customerEmail) > maxCustomerEmailLength {
+		return newValidationError("customer email must have at most 255 characters")
+	}
+
+	// mail.ParseAddress also accepts "Name <email>", so only a bare address is valid.
+	address, err := mail.ParseAddress(customerEmail)
+	if err != nil || address.Address != customerEmail {
+		return newValidationError("invalid customer email")
 	}
 
 	parsedDate, err := time.Parse("2006-01-02", input.AppointmentDate)
 	if err != nil {
-		return fmt.Errorf("invalid appointment date")
+		return newValidationError("invalid appointment date")
 	}
 
 	if parsedDate.Weekday() == time.Saturday ||
 		parsedDate.Weekday() == time.Sunday {
-		return fmt.Errorf("appointments are not available on weekends")
+		return newValidationError("appointments are not available on weekends")
 	}
 
 	startTime, err := time.Parse("15:04", input.StartTime)
 	if err != nil {
-		return fmt.Errorf("invalid start time")
+		return newValidationError("invalid start time")
 	}
 
 	endTime, err := time.Parse("15:04", input.EndTime)
 	if err != nil {
-		return fmt.Errorf("invalid end time")
+		return newValidationError("invalid end time")
 	}
 
 	if startTime.Minute() != 0 || endTime.Minute() != 0 {
-		return fmt.Errorf("appointments must start and end on the hour")
+		return newValidationError("appointments must start and end on the hour")
 	}
 
 	if startTime.Hour() < 8 || startTime.Hour() >= 16 {
-		return fmt.Errorf("appointment start time must be between 08:00 and 15:00")
+		return newValidationError("appointment start time must be between 08:00 and 15:00")
 	}
 
 	if endTime.Hour() < 9 || endTime.Hour() > 16 {
-		return fmt.Errorf("appointment end time must be between 09:00 and 16:00")
+		return newValidationError("appointment end time must be between 09:00 and 16:00")
 	}
 
 	if endTime.Sub(startTime) != time.Hour {
-		return fmt.Errorf("appointment must last exactly one hour")
+		return newValidationError("appointment must last exactly one hour")
 	}
 
 	return nil
@@ -145,7 +186,7 @@ func (s *AppointmentService) GetAvailableSlots(
 ) ([]AvailableSlot, error) {
 	parsedDate, err := time.Parse("2006-01-02", date)
 	if err != nil {
-		return nil, fmt.Errorf("invalid date format: %w", err)
+		return nil, newValidationError("invalid date format, expected YYYY-MM-DD")
 	}
 
 	if parsedDate.Weekday() == time.Saturday ||
@@ -165,7 +206,8 @@ func (s *AppointmentService) GetAvailableSlots(
 		bookedSlots[startTime] = true
 	}
 
-	var availableSlots []AvailableSlot
+	// Non-nil so a fully booked day is encoded as [] instead of null.
+	availableSlots := []AvailableSlot{}
 
 	for hour := 8; hour < 16; hour++ {
 		startTime := fmt.Sprintf("%02d:00", hour)

@@ -3,11 +3,14 @@ package handlers
 import (
 	"encoding/json"
 	"errors"
+	"log"
 	"net/http"
 
 	"github.com/pitercoding/terminuler/internal/repositories"
 	"github.com/pitercoding/terminuler/internal/services"
 )
+
+const maxRequestBodyBytes = 1 << 20 // 1 MB
 
 type AppointmentHandler struct {
 	service *services.AppointmentService
@@ -30,10 +33,51 @@ func NewAppointmentHandler(
 	}
 }
 
+// writeServiceError maps service errors to HTTP responses without
+// leaking internal error details to the client.
+func writeServiceError(
+	w http.ResponseWriter,
+	err error,
+) {
+	var validationError *services.ValidationError
+
+	switch {
+	case errors.As(err, &validationError):
+		http.Error(
+			w,
+			validationError.Message,
+			http.StatusBadRequest,
+		)
+	case errors.Is(err, repositories.ErrAppointmentConflict):
+		http.Error(
+			w,
+			"appointment slot is already booked",
+			http.StatusConflict,
+		)
+	default:
+		log.Printf("internal server error: %v", err)
+
+		http.Error(
+			w,
+			"internal server error",
+			http.StatusInternalServerError,
+		)
+	}
+}
+
 func (h *AppointmentHandler) GetAvailability(
 	w http.ResponseWriter,
 	r *http.Request,
 ) {
+	if r.Method != http.MethodGet {
+		http.Error(
+			w,
+			"method not allowed",
+			http.StatusMethodNotAllowed,
+		)
+		return
+	}
+
 	date := r.URL.Query().Get("date")
 
 	if date == "" {
@@ -51,11 +95,7 @@ func (h *AppointmentHandler) GetAvailability(
 	)
 
 	if err != nil {
-		http.Error(
-			w,
-			err.Error(),
-			http.StatusBadRequest,
-		)
+		writeServiceError(w, err)
 		return
 	}
 
@@ -91,6 +131,8 @@ func (h *AppointmentHandler) CreateAppointment(
 		return
 	}
 
+	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodyBytes)
+
 	var request createAppointmentRequest
 
 	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
@@ -117,20 +159,7 @@ func (h *AppointmentHandler) CreateAppointment(
 	)
 
 	if err != nil {
-		if errors.Is(err, repositories.ErrAppointmentConflict) {
-			http.Error(
-				w,
-				"appointment slot is already booked",
-				http.StatusConflict,
-			)
-			return
-		}
-
-		http.Error(
-			w,
-			err.Error(),
-			http.StatusBadRequest,
-		)
+		writeServiceError(w, err)
 		return
 	}
 
