@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/pitercoding/terminuler/internal/models"
 	"github.com/pitercoding/terminuler/internal/repositories"
@@ -45,10 +46,16 @@ func (m *mockAppointmentRepository) Create(
 	return nil
 }
 
+// fixedClock returns a fixed "current time" (Friday, 2026-09-25 12:00 UTC),
+// so the tests do not depend on the real date.
+func fixedClock() time.Time {
+	return time.Date(2026, time.September, 25, 12, 0, 0, 0, time.UTC)
+}
+
 func TestCreateAppointment_Success(t *testing.T) {
 	repository := &mockAppointmentRepository{}
 
-	service := services.NewAppointmentService(repository)
+	service := services.NewAppointmentService(repository, fixedClock)
 
 	handler := NewAppointmentHandler(service)
 
@@ -82,21 +89,37 @@ func TestCreateAppointment_Success(t *testing.T) {
 		)
 	}
 
-	if !strings.Contains(
-		recorder.Body.String(),
-		`"id":1`,
-	) {
-		t.Fatalf(
-			"expected response to contain appointment ID, got %s",
-			recorder.Body.String(),
-		)
+	var response map[string]any
+
+	if err := json.NewDecoder(recorder.Body).Decode(&response); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+
+	expected := map[string]any{
+		"id":               float64(1),
+		"appointment_date": "2026-09-28",
+		"start_time":       "10:00",
+		"end_time":         "11:00",
+		"customer_name":    "Racha Cuca",
+		"customer_phone":   "+5511999999999",
+		"customer_email":   "rc@exemple.com",
+	}
+
+	for key, value := range expected {
+		if response[key] != value {
+			t.Errorf("expected %s to be %v, got %v", key, value, response[key])
+		}
+	}
+
+	if _, ok := response["created_at"]; !ok {
+		t.Error("expected response to contain created_at")
 	}
 }
 
 func TestCreateAppointment_InvalidJSON(t *testing.T) {
 	repository := &mockAppointmentRepository{}
 
-	service := services.NewAppointmentService(repository)
+	service := services.NewAppointmentService(repository, fixedClock)
 
 	handler := NewAppointmentHandler(service)
 
@@ -127,7 +150,7 @@ func TestCreateAppointment_InvalidJSON(t *testing.T) {
 func TestCreateAppointment_ValidationError(t *testing.T) {
 	repository := &mockAppointmentRepository{}
 
-	service := services.NewAppointmentService(repository)
+	service := services.NewAppointmentService(repository, fixedClock)
 
 	handler := NewAppointmentHandler(service)
 
@@ -167,7 +190,7 @@ func TestCreateAppointment_Conflict(t *testing.T) {
 		err: repositories.ErrAppointmentConflict,
 	}
 
-	service := services.NewAppointmentService(repository)
+	service := services.NewAppointmentService(repository, fixedClock)
 
 	handler := NewAppointmentHandler(service)
 
@@ -202,41 +225,12 @@ func TestCreateAppointment_Conflict(t *testing.T) {
 	}
 }
 
-func TestCreateAppointment_MethodNotAllowed(t *testing.T) {
-	repository := &mockAppointmentRepository{}
-
-	service := services.NewAppointmentService(repository)
-
-	handler := NewAppointmentHandler(service)
-
-	request := httptest.NewRequest(
-		http.MethodGet,
-		"/appointments",
-		nil,
-	)
-
-	recorder := httptest.NewRecorder()
-
-	handler.CreateAppointment(
-		recorder,
-		request,
-	)
-
-	if recorder.Code != http.StatusMethodNotAllowed {
-		t.Fatalf(
-			"expected status %d, got %d",
-			http.StatusMethodNotAllowed,
-			recorder.Code,
-		)
-	}
-}
-
 func TestCreateAppointment_RepositoryError(t *testing.T) {
 	repository := &mockAppointmentRepository{
 		err: errors.New("database connection failed"),
 	}
 
-	service := services.NewAppointmentService(repository)
+	service := services.NewAppointmentService(repository, fixedClock)
 
 	handler := NewAppointmentHandler(service)
 
@@ -284,7 +278,7 @@ func TestCreateAppointment_RepositoryError(t *testing.T) {
 func TestCreateAppointment_ValidationErrorMessage(t *testing.T) {
 	repository := &mockAppointmentRepository{}
 
-	service := services.NewAppointmentService(repository)
+	service := services.NewAppointmentService(repository, fixedClock)
 
 	handler := NewAppointmentHandler(service)
 
@@ -332,7 +326,7 @@ func TestCreateAppointment_ValidationErrorMessage(t *testing.T) {
 func TestCreateAppointment_BodyTooLarge(t *testing.T) {
 	repository := &mockAppointmentRepository{}
 
-	service := services.NewAppointmentService(repository)
+	service := services.NewAppointmentService(repository, fixedClock)
 
 	handler := NewAppointmentHandler(service)
 
@@ -372,7 +366,7 @@ func TestGetAvailability_Success(t *testing.T) {
 		},
 	}
 
-	service := services.NewAppointmentService(repository)
+	service := services.NewAppointmentService(repository, fixedClock)
 
 	handler := NewAppointmentHandler(service)
 
@@ -438,7 +432,7 @@ func TestGetAvailability_FullyBookedReturnsEmptyList(t *testing.T) {
 		appointments: appointments,
 	}
 
-	service := services.NewAppointmentService(repository)
+	service := services.NewAppointmentService(repository, fixedClock)
 
 	handler := NewAppointmentHandler(service)
 
@@ -477,7 +471,7 @@ func TestGetAvailability_FullyBookedReturnsEmptyList(t *testing.T) {
 func TestGetAvailability_MissingDate(t *testing.T) {
 	repository := &mockAppointmentRepository{}
 
-	service := services.NewAppointmentService(repository)
+	service := services.NewAppointmentService(repository, fixedClock)
 
 	handler := NewAppointmentHandler(service)
 
@@ -506,7 +500,7 @@ func TestGetAvailability_MissingDate(t *testing.T) {
 func TestGetAvailability_InvalidDate(t *testing.T) {
 	repository := &mockAppointmentRepository{}
 
-	service := services.NewAppointmentService(repository)
+	service := services.NewAppointmentService(repository, fixedClock)
 
 	handler := NewAppointmentHandler(service)
 
@@ -537,7 +531,7 @@ func TestGetAvailability_RepositoryError(t *testing.T) {
 		getByDateErr: errors.New("database connection failed"),
 	}
 
-	service := services.NewAppointmentService(repository)
+	service := services.NewAppointmentService(repository, fixedClock)
 
 	handler := NewAppointmentHandler(service)
 
@@ -573,16 +567,64 @@ func TestGetAvailability_RepositoryError(t *testing.T) {
 	}
 }
 
-func TestGetAvailability_MethodNotAllowed(t *testing.T) {
+func TestCreateAppointment_PastDate(t *testing.T) {
 	repository := &mockAppointmentRepository{}
 
-	service := services.NewAppointmentService(repository)
+	service := services.NewAppointmentService(repository, fixedClock)
+
+	handler := NewAppointmentHandler(service)
+
+	body := `{
+		"appointment_date": "2020-01-06",
+		"start_time": "10:00",
+		"end_time": "11:00",
+		"customer_name": "Racha Cuca",
+		"customer_phone": "+5511999999999",
+		"customer_email": "rc@exemple.com"
+	}`
+
+	request := httptest.NewRequest(
+		http.MethodPost,
+		"/appointments",
+		strings.NewReader(body),
+	)
+
+	recorder := httptest.NewRecorder()
+
+	handler.CreateAppointment(
+		recorder,
+		request,
+	)
+
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf(
+			"expected status %d, got %d",
+			http.StatusBadRequest,
+			recorder.Code,
+		)
+	}
+
+	if !strings.Contains(
+		recorder.Body.String(),
+		"appointment must be scheduled in the future",
+	) {
+		t.Fatalf(
+			"expected past date message, got %s",
+			recorder.Body.String(),
+		)
+	}
+}
+
+func TestGetAvailability_PastDateReturnsEmptyList(t *testing.T) {
+	repository := &mockAppointmentRepository{}
+
+	service := services.NewAppointmentService(repository, fixedClock)
 
 	handler := NewAppointmentHandler(service)
 
 	request := httptest.NewRequest(
-		http.MethodPost,
-		"/appointments/availability?date=2026-09-28",
+		http.MethodGet,
+		"/appointments/availability?date=2020-01-06",
 		nil,
 	)
 
@@ -593,11 +635,21 @@ func TestGetAvailability_MethodNotAllowed(t *testing.T) {
 		request,
 	)
 
-	if recorder.Code != http.StatusMethodNotAllowed {
+	if recorder.Code != http.StatusOK {
 		t.Fatalf(
 			"expected status %d, got %d",
-			http.StatusMethodNotAllowed,
+			http.StatusOK,
 			recorder.Code,
+		)
+	}
+
+	if !strings.Contains(
+		recorder.Body.String(),
+		`"available_slots":[]`,
+	) {
+		t.Fatalf(
+			"expected empty available slots list, got %s",
+			recorder.Body.String(),
 		)
 	}
 }

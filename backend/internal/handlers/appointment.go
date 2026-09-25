@@ -5,7 +5,9 @@ import (
 	"errors"
 	"log"
 	"net/http"
+	"time"
 
+	"github.com/pitercoding/terminuler/internal/models"
 	"github.com/pitercoding/terminuler/internal/repositories"
 	"github.com/pitercoding/terminuler/internal/services"
 )
@@ -23,6 +25,35 @@ type createAppointmentRequest struct {
 	CustomerName    string `json:"customer_name"`
 	CustomerPhone   string `json:"customer_phone"`
 	CustomerEmail   string `json:"customer_email"`
+}
+
+// appointmentResponse is the JSON shape returned to clients. The date is a
+// plain calendar date (YYYY-MM-DD) so browsers do not shift it to the
+// previous day when converting from UTC to the local timezone.
+type appointmentResponse struct {
+	ID              int64     `json:"id"`
+	AppointmentDate string    `json:"appointment_date"`
+	StartTime       string    `json:"start_time"`
+	EndTime         string    `json:"end_time"`
+	CustomerName    string    `json:"customer_name"`
+	CustomerPhone   string    `json:"customer_phone"`
+	CustomerEmail   string    `json:"customer_email"`
+	CreatedAt       time.Time `json:"created_at"`
+}
+
+func newAppointmentResponse(
+	appointment *models.Appointment,
+) appointmentResponse {
+	return appointmentResponse{
+		ID:              appointment.ID,
+		AppointmentDate: appointment.AppointmentDate.Format("2006-01-02"),
+		StartTime:       appointment.StartTime,
+		EndTime:         appointment.EndTime,
+		CustomerName:    appointment.CustomerName,
+		CustomerPhone:   appointment.CustomerPhone,
+		CustomerEmail:   appointment.CustomerEmail,
+		CreatedAt:       appointment.CreatedAt,
+	}
 }
 
 func NewAppointmentHandler(
@@ -69,15 +100,6 @@ func (h *AppointmentHandler) GetAvailability(
 	w http.ResponseWriter,
 	r *http.Request,
 ) {
-	if r.Method != http.MethodGet {
-		http.Error(
-			w,
-			"method not allowed",
-			http.StatusMethodNotAllowed,
-		)
-		return
-	}
-
 	date := r.URL.Query().Get("date")
 
 	if date == "" {
@@ -122,15 +144,6 @@ func (h *AppointmentHandler) CreateAppointment(
 	w http.ResponseWriter,
 	r *http.Request,
 ) {
-	if r.Method != http.MethodPost {
-		http.Error(
-			w,
-			"method not allowed",
-			http.StatusMethodNotAllowed,
-		)
-		return
-	}
-
 	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodyBytes)
 
 	var request createAppointmentRequest
@@ -166,7 +179,9 @@ func (h *AppointmentHandler) CreateAppointment(
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 
-	if err := json.NewEncoder(w).Encode(appointment); err != nil {
+	if err := json.NewEncoder(w).Encode(
+		newAppointmentResponse(appointment),
+	); err != nil {
 		http.Error(
 			w,
 			"failed to encode response",

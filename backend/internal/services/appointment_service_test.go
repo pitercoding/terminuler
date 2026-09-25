@@ -44,10 +44,214 @@ func (m *mockAppointmentRepository) Create(
 	return nil
 }
 
+// testNow is the fixed "current time" used by the tests (Friday,
+// 2026-09-25 12:00 UTC), so they do not depend on the real date.
+var testNow = time.Date(2026, time.September, 25, 12, 0, 0, 0, time.UTC)
+
+func fixedClock() time.Time {
+	return testNow
+}
+
+func clockAt(now time.Time) func() time.Time {
+	return func() time.Time {
+		return now
+	}
+}
+
+func validInputFor(date string, startTime string, endTime string) CreateAppointmentInput {
+	return CreateAppointmentInput{
+		AppointmentDate: date,
+		StartTime:       startTime,
+		EndTime:         endTime,
+		CustomerName:    "Racha Cuca",
+		CustomerPhone:   "+5511999999999",
+		CustomerEmail:   "rc@exemple.com",
+	}
+}
+
+func TestValidateCreateAppointment_PastAndPresent(t *testing.T) {
+	// Thursday, 2026-09-24 10:30 UTC
+	now := time.Date(2026, time.September, 24, 10, 30, 0, 0, time.UTC)
+
+	service := NewAppointmentService(nil, clockAt(now))
+
+	tests := []struct {
+		name        string
+		input       CreateAppointmentInput
+		expectError bool
+	}{
+		{
+			name:        "date in the past",
+			input:       validInputFor("2020-01-06", "10:00", "11:00"),
+			expectError: true,
+		},
+		{
+			name:        "yesterday",
+			input:       validInputFor("2026-09-23", "15:00", "16:00"),
+			expectError: true,
+		},
+		{
+			name:        "today, slot already finished",
+			input:       validInputFor("2026-09-24", "08:00", "09:00"),
+			expectError: true,
+		},
+		{
+			name:        "today, slot in progress",
+			input:       validInputFor("2026-09-24", "10:00", "11:00"),
+			expectError: true,
+		},
+		{
+			name:        "today, next slot",
+			input:       validInputFor("2026-09-24", "11:00", "12:00"),
+			expectError: false,
+		},
+		{
+			name:        "tomorrow, first slot",
+			input:       validInputFor("2026-09-25", "08:00", "09:00"),
+			expectError: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := service.ValidateCreateAppointment(tt.input)
+
+			if tt.expectError && err == nil {
+				t.Fatal("expected an error, got nil")
+			}
+
+			if !tt.expectError && err != nil {
+				t.Fatalf("expected no error, got %v", err)
+			}
+		})
+	}
+}
+
+func TestValidateCreateAppointment_UsesClockTimezone(t *testing.T) {
+	saoPaulo, err := time.LoadLocation("America/Sao_Paulo")
+	if err != nil {
+		t.Fatalf("failed to load timezone: %v", err)
+	}
+
+	// 12:30 UTC is 09:30 in São Paulo (UTC-3).
+	now := time.Date(2026, time.September, 24, 12, 30, 0, 0, time.UTC).
+		In(saoPaulo)
+
+	service := NewAppointmentService(nil, clockAt(now))
+
+	// 10:00 is in the future in São Paulo, although 10:00 UTC has passed.
+	if err := service.ValidateCreateAppointment(
+		validInputFor("2026-09-24", "10:00", "11:00"),
+	); err != nil {
+		t.Fatalf("expected 10:00 to be bookable, got %v", err)
+	}
+
+	if err := service.ValidateCreateAppointment(
+		validInputFor("2026-09-24", "09:00", "10:00"),
+	); err == nil {
+		t.Fatal("expected 09:00 to be in the past")
+	}
+}
+
+func TestGetAvailableSlots_PastDate(t *testing.T) {
+	repository := &mockAppointmentRepository{
+		err: errors.New("repository should not be called"),
+	}
+
+	service := NewAppointmentService(repository, fixedClock)
+
+	slots, err := service.GetAvailableSlots(
+		context.Background(),
+		"2026-09-24",
+	)
+
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+
+	if len(slots) != 0 {
+		t.Fatalf("expected 0 available slots, got %d", len(slots))
+	}
+}
+
+func TestGetAvailableSlots_TodayHidesStartedSlots(t *testing.T) {
+	repository := &mockAppointmentRepository{
+		appointments: []models.Appointment{
+			{
+				StartTime: "14:00:00",
+				EndTime:   "15:00:00",
+			},
+		},
+	}
+
+	// Friday, 2026-09-25 12:00: 08:00-12:00 have started, 14:00 is booked.
+	service := NewAppointmentService(repository, fixedClock)
+
+	slots, err := service.GetAvailableSlots(
+		context.Background(),
+		"2026-09-25",
+	)
+
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+
+	expected := []string{"13:00", "15:00"}
+
+	if len(slots) != len(expected) {
+		t.Fatalf("expected slots %v, got %v", expected, slots)
+	}
+
+	for i, slot := range slots {
+		if slot.StartTime != expected[i] {
+			t.Errorf(
+				"expected slot %d to start at %s, got %s",
+				i,
+				expected[i],
+				slot.StartTime,
+			)
+		}
+	}
+}
+
+func TestGetAvailableSlots_TodayAfterLastSlotStarted(t *testing.T) {
+	now := time.Date(2026, time.September, 25, 15, 0, 0, 0, time.UTC)
+
+	service := NewAppointmentService(
+		&mockAppointmentRepository{},
+		clockAt(now),
+	)
+
+	slots, err := service.GetAvailableSlots(
+		context.Background(),
+		"2026-09-25",
+	)
+
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+
+	if slots == nil || len(slots) != 0 {
+		t.Fatalf("expected empty non-nil slice, got %v", slots)
+	}
+}
+
+func TestNewAppointmentService_NilClockUsesTimeNow(t *testing.T) {
+	service := NewAppointmentService(nil, nil)
+
+	if service.now == nil {
+		t.Fatal("expected default clock")
+	}
+
+	if time.Since(service.now()) > time.Minute {
+		t.Fatal("expected default clock to return the current time")
+	}
+}
+
 func TestGetAvailableSlots_WeekdayWithoutAppointments(t *testing.T) {
 	repository := &mockAppointmentRepository{}
 
-	service := NewAppointmentService(repository)
+	service := NewAppointmentService(repository, fixedClock)
 
 	slots, err := service.GetAvailableSlots(
 		context.Background(),
@@ -80,7 +284,7 @@ func TestGetAvailableSlots_WeekdayWithoutAppointments(t *testing.T) {
 func TestGetAvailableSlots_Saturday(t *testing.T) {
 	repository := &mockAppointmentRepository{}
 
-	service := NewAppointmentService(repository)
+	service := NewAppointmentService(repository, fixedClock)
 
 	slots, err := service.GetAvailableSlots(
 		context.Background(),
@@ -99,7 +303,7 @@ func TestGetAvailableSlots_Saturday(t *testing.T) {
 func TestGetAvailableSlots_Sunday(t *testing.T) {
 	repository := &mockAppointmentRepository{}
 
-	service := NewAppointmentService(repository)
+	service := NewAppointmentService(repository, fixedClock)
 
 	slots, err := service.GetAvailableSlots(
 		context.Background(),
@@ -141,7 +345,7 @@ func TestGetAvailableSlots_WithBookedAppointment(t *testing.T) {
 		},
 	}
 
-	service := NewAppointmentService(repository)
+	service := NewAppointmentService(repository, fixedClock)
 
 	slots, err := service.GetAvailableSlots(
 		context.Background(),
@@ -166,7 +370,7 @@ func TestGetAvailableSlots_WithBookedAppointment(t *testing.T) {
 func TestGetAvailableSlots_InvalidDate(t *testing.T) {
 	repository := &mockAppointmentRepository{}
 
-	service := NewAppointmentService(repository)
+	service := NewAppointmentService(repository, fixedClock)
 
 	_, err := service.GetAvailableSlots(
 		context.Background(),
@@ -183,7 +387,7 @@ func TestGetAvailableSlots_RepositoryError(t *testing.T) {
 		err: errors.New("database connection failed"),
 	}
 
-	service := NewAppointmentService(repository)
+	service := NewAppointmentService(repository, fixedClock)
 
 	_, err := service.GetAvailableSlots(
 		context.Background(),
@@ -196,7 +400,7 @@ func TestGetAvailableSlots_RepositoryError(t *testing.T) {
 }
 
 func TestValidateCreateAppointment(t *testing.T) {
-	service := NewAppointmentService(nil)
+	service := NewAppointmentService(nil, fixedClock)
 
 	tests := []struct {
 		name        string
@@ -538,7 +742,7 @@ func TestValidateCreateAppointment(t *testing.T) {
 func TestCreateAppointment_Success(t *testing.T) {
 	repository := &mockAppointmentRepository{}
 
-	service := NewAppointmentService(repository)
+	service := NewAppointmentService(repository, fixedClock)
 
 	input := CreateAppointmentInput{
 		AppointmentDate: "2026-09-28",
@@ -605,7 +809,7 @@ func TestCreateAppointment_Success(t *testing.T) {
 func TestCreateAppointment_ValidationError(t *testing.T) {
 	repository := &mockAppointmentRepository{}
 
-	service := NewAppointmentService(repository)
+	service := NewAppointmentService(repository, fixedClock)
 
 	input := CreateAppointmentInput{
 		AppointmentDate: "2026-09-28",
@@ -639,7 +843,7 @@ func TestCreateAppointment_ConflictError(t *testing.T) {
 		err: repositories.ErrAppointmentConflict,
 	}
 
-	service := NewAppointmentService(repository)
+	service := NewAppointmentService(repository, fixedClock)
 
 	input := CreateAppointmentInput{
 		AppointmentDate: "2026-09-28",
@@ -663,7 +867,7 @@ func TestCreateAppointment_ConflictError(t *testing.T) {
 func TestCreateAppointment_ParsesAppointmentDate(t *testing.T) {
 	repository := &mockAppointmentRepository{}
 
-	service := NewAppointmentService(repository)
+	service := NewAppointmentService(repository, fixedClock)
 
 	input := CreateAppointmentInput{
 		AppointmentDate: "2026-09-28",
@@ -708,7 +912,7 @@ func TestGetAvailableSlots_FullyBooked(t *testing.T) {
 		appointments: appointments,
 	}
 
-	service := NewAppointmentService(repository)
+	service := NewAppointmentService(repository, fixedClock)
 
 	slots, err := service.GetAvailableSlots(
 		context.Background(),
@@ -731,7 +935,7 @@ func TestGetAvailableSlots_FullyBooked(t *testing.T) {
 func TestGetAvailableSlots_SlotEndTimes(t *testing.T) {
 	repository := &mockAppointmentRepository{}
 
-	service := NewAppointmentService(repository)
+	service := NewAppointmentService(repository, fixedClock)
 
 	slots, err := service.GetAvailableSlots(
 		context.Background(),
@@ -759,7 +963,7 @@ func TestGetAvailableSlots_SlotEndTimes(t *testing.T) {
 func TestGetAvailableSlots_ErrorTypes(t *testing.T) {
 	var validationError *ValidationError
 
-	service := NewAppointmentService(&mockAppointmentRepository{})
+	service := NewAppointmentService(&mockAppointmentRepository{}, fixedClock)
 
 	_, err := service.GetAvailableSlots(
 		context.Background(),
@@ -772,7 +976,7 @@ func TestGetAvailableSlots_ErrorTypes(t *testing.T) {
 
 	service = NewAppointmentService(&mockAppointmentRepository{
 		err: errors.New("database connection failed"),
-	})
+	}, fixedClock)
 
 	_, err = service.GetAvailableSlots(
 		context.Background(),
@@ -789,7 +993,7 @@ func TestCreateAppointment_RepositoryError(t *testing.T) {
 		err: errors.New("database connection failed"),
 	}
 
-	service := NewAppointmentService(repository)
+	service := NewAppointmentService(repository, fixedClock)
 
 	input := CreateAppointmentInput{
 		AppointmentDate: "2026-09-28",

@@ -3,6 +3,7 @@ package main
 import (
 	"log"
 	"net/http"
+	"time"
 
 	"github.com/pitercoding/terminuler/internal/config"
 	"github.com/pitercoding/terminuler/internal/database"
@@ -28,12 +29,20 @@ func main() {
 	}
 	defer db.Close()
 
+	location, err := config.Location()
+	if err != nil {
+		log.Fatal(err)
+	}
+
 	mux := http.NewServeMux()
 
 	appointmentRepository := repositories.NewAppointmentRepository(db)
 
 	appointmentService := services.NewAppointmentService(
 		appointmentRepository,
+		func() time.Time {
+			return time.Now().In(location)
+		},
 	)
 
 	appointmentHandler := handlers.NewAppointmentHandler(
@@ -45,9 +54,15 @@ func main() {
 		appointmentHandler,
 	)
 
-	log.Println("Terminuler API running on http://localhost:8080")
+	port := config.Port()
 
-	if err := http.ListenAndServe(":8080", mux); err != nil {
+	log.Printf(
+		"Terminuler API running on http://localhost:%s (timezone: %s)",
+		port,
+		location,
+	)
+
+	if err := http.ListenAndServe(":"+port, mux); err != nil {
 		log.Fatal(err)
 	}
 }

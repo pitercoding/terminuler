@@ -52,16 +52,46 @@ func newValidationError(message string) error {
 	}
 }
 
+const (
+	openingHour = 8
+	closingHour = 16
+)
+
 type AppointmentService struct {
 	repository AppointmentRepository
+	now        func() time.Time
 }
 
+// NewAppointmentService creates the service. now returns the current time
+// in the business timezone; appointment dates and times are interpreted in
+// that timezone. Passing nil uses time.Now.
 func NewAppointmentService(
 	repository AppointmentRepository,
+	now func() time.Time,
 ) *AppointmentService {
+	if now == nil {
+		now = time.Now
+	}
+
 	return &AppointmentService{
 		repository: repository,
+		now:        now,
 	}
+}
+
+// slotStart combines a date and an hour into a point in time in the
+// business timezone.
+func slotStart(date time.Time, hour int, location *time.Location) time.Time {
+	return time.Date(
+		date.Year(),
+		date.Month(),
+		date.Day(),
+		hour,
+		0,
+		0,
+		0,
+		location,
+	)
 }
 
 func (s *AppointmentService) ValidateCreateAppointment(
@@ -125,16 +155,22 @@ func (s *AppointmentService) ValidateCreateAppointment(
 		return newValidationError("appointments must start and end on the hour")
 	}
 
-	if startTime.Hour() < 8 || startTime.Hour() >= 16 {
+	if startTime.Hour() < openingHour || startTime.Hour() >= closingHour {
 		return newValidationError("appointment start time must be between 08:00 and 15:00")
 	}
 
-	if endTime.Hour() < 9 || endTime.Hour() > 16 {
+	if endTime.Hour() < openingHour+1 || endTime.Hour() > closingHour {
 		return newValidationError("appointment end time must be between 09:00 and 16:00")
 	}
 
 	if endTime.Sub(startTime) != time.Hour {
 		return newValidationError("appointment must last exactly one hour")
+	}
+
+	now := s.now()
+
+	if !slotStart(parsedDate, startTime.Hour(), now.Location()).After(now) {
+		return newValidationError("appointment must be scheduled in the future")
 	}
 
 	return nil
@@ -194,6 +230,13 @@ func (s *AppointmentService) GetAvailableSlots(
 		return []AvailableSlot{}, nil
 	}
 
+	now := s.now()
+
+	// The last slot of the day has already started: nothing left to book.
+	if !slotStart(parsedDate, closingHour-1, now.Location()).After(now) {
+		return []AvailableSlot{}, nil
+	}
+
 	appointments, err := s.repository.GetByDate(ctx, date)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get appointments: %w", err)
@@ -209,11 +252,15 @@ func (s *AppointmentService) GetAvailableSlots(
 	// Non-nil so a fully booked day is encoded as [] instead of null.
 	availableSlots := []AvailableSlot{}
 
-	for hour := 8; hour < 16; hour++ {
+	for hour := openingHour; hour < closingHour; hour++ {
 		startTime := fmt.Sprintf("%02d:00", hour)
 		endTime := fmt.Sprintf("%02d:00", hour+1)
 
 		if bookedSlots[startTime] {
+			continue
+		}
+
+		if !slotStart(parsedDate, hour, now.Location()).After(now) {
 			continue
 		}
 
