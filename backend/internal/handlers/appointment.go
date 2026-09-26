@@ -74,24 +74,24 @@ func writeServiceError(
 
 	switch {
 	case errors.As(err, &validationError):
-		http.Error(
+		writeError(
 			w,
-			validationError.Message,
 			http.StatusBadRequest,
+			validationError.Message,
 		)
 	case errors.Is(err, repositories.ErrAppointmentConflict):
-		http.Error(
+		writeError(
 			w,
-			"appointment slot is already booked",
 			http.StatusConflict,
+			"appointment slot is already booked",
 		)
 	default:
 		log.Printf("internal server error: %v", err)
 
-		http.Error(
+		writeError(
 			w,
-			"internal server error",
 			http.StatusInternalServerError,
+			"internal server error",
 		)
 	}
 }
@@ -103,10 +103,10 @@ func (h *AppointmentHandler) GetAvailability(
 	date := r.URL.Query().Get("date")
 
 	if date == "" {
-		http.Error(
+		writeError(
 			w,
-			"date query parameter is required",
 			http.StatusBadRequest,
+			"date query parameter is required",
 		)
 		return
 	}
@@ -129,15 +129,7 @@ func (h *AppointmentHandler) GetAvailability(
 		AvailableSlots: slots,
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-
-	if err := json.NewEncoder(w).Encode(response); err != nil {
-		http.Error(
-			w,
-			"failed to encode response",
-			http.StatusInternalServerError,
-		)
-	}
+	writeJSON(w, http.StatusOK, response)
 }
 
 func (h *AppointmentHandler) CreateAppointment(
@@ -149,10 +141,10 @@ func (h *AppointmentHandler) CreateAppointment(
 	var request createAppointmentRequest
 
 	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
-		http.Error(
+		writeError(
 			w,
-			"invalid request body",
 			http.StatusBadRequest,
+			"invalid request body",
 		)
 		return
 	}
@@ -176,16 +168,9 @@ func (h *AppointmentHandler) CreateAppointment(
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusCreated)
-
-	if err := json.NewEncoder(w).Encode(
+	writeJSON(
+		w,
+		http.StatusCreated,
 		newAppointmentResponse(appointment),
-	); err != nil {
-		http.Error(
-			w,
-			"failed to encode response",
-			http.StatusInternalServerError,
-		)
-	}
+	)
 }

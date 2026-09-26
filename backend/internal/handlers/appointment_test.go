@@ -52,6 +52,34 @@ func fixedClock() time.Time {
 	return time.Date(2026, time.September, 25, 12, 0, 0, 0, time.UTC)
 }
 
+// assertErrorResponse checks that the response is a JSON error body in the
+// format {"error": expectedMessage}.
+func assertErrorResponse(
+	t *testing.T,
+	recorder *httptest.ResponseRecorder,
+	expectedMessage string,
+) {
+	t.Helper()
+
+	if contentType := recorder.Header().Get("Content-Type"); contentType != "application/json" {
+		t.Errorf("expected Content-Type application/json, got %q", contentType)
+	}
+
+	var response map[string]any
+
+	if err := json.NewDecoder(recorder.Body).Decode(&response); err != nil {
+		t.Fatalf("failed to decode error response: %v", err)
+	}
+
+	if len(response) != 1 || response["error"] != expectedMessage {
+		t.Fatalf(
+			`expected {"error": %q}, got %v`,
+			expectedMessage,
+			response,
+		)
+	}
+}
+
 func TestCreateAppointment_Success(t *testing.T) {
 	repository := &mockAppointmentRepository{}
 
@@ -145,6 +173,8 @@ func TestCreateAppointment_InvalidJSON(t *testing.T) {
 			recorder.Code,
 		)
 	}
+
+	assertErrorResponse(t, recorder, "invalid request body")
 }
 
 func TestCreateAppointment_ValidationError(t *testing.T) {
@@ -183,6 +213,8 @@ func TestCreateAppointment_ValidationError(t *testing.T) {
 			recorder.Code,
 		)
 	}
+
+	assertErrorResponse(t, recorder, "customer name is required")
 }
 
 func TestCreateAppointment_Conflict(t *testing.T) {
@@ -223,6 +255,8 @@ func TestCreateAppointment_Conflict(t *testing.T) {
 			recorder.Code,
 		)
 	}
+
+	assertErrorResponse(t, recorder, "appointment slot is already booked")
 }
 
 func TestCreateAppointment_RepositoryError(t *testing.T) {
@@ -273,6 +307,8 @@ func TestCreateAppointment_RepositoryError(t *testing.T) {
 			recorder.Body.String(),
 		)
 	}
+
+	assertErrorResponse(t, recorder, "internal server error")
 }
 
 func TestCreateAppointment_ValidationErrorMessage(t *testing.T) {
@@ -312,15 +348,7 @@ func TestCreateAppointment_ValidationErrorMessage(t *testing.T) {
 		)
 	}
 
-	if !strings.Contains(
-		recorder.Body.String(),
-		"appointments are not available on weekends",
-	) {
-		t.Fatalf(
-			"expected validation message in response, got %s",
-			recorder.Body.String(),
-		)
-	}
+	assertErrorResponse(t, recorder, "appointments are not available on weekends")
 }
 
 func TestCreateAppointment_BodyTooLarge(t *testing.T) {
@@ -354,6 +382,8 @@ func TestCreateAppointment_BodyTooLarge(t *testing.T) {
 			recorder.Code,
 		)
 	}
+
+	assertErrorResponse(t, recorder, "invalid request body")
 }
 
 func TestGetAvailability_Success(t *testing.T) {
@@ -495,6 +525,8 @@ func TestGetAvailability_MissingDate(t *testing.T) {
 			recorder.Code,
 		)
 	}
+
+	assertErrorResponse(t, recorder, "date query parameter is required")
 }
 
 func TestGetAvailability_InvalidDate(t *testing.T) {
@@ -524,6 +556,8 @@ func TestGetAvailability_InvalidDate(t *testing.T) {
 			recorder.Code,
 		)
 	}
+
+	assertErrorResponse(t, recorder, "invalid date format, expected YYYY-MM-DD")
 }
 
 func TestGetAvailability_RepositoryError(t *testing.T) {
@@ -565,6 +599,8 @@ func TestGetAvailability_RepositoryError(t *testing.T) {
 			recorder.Body.String(),
 		)
 	}
+
+	assertErrorResponse(t, recorder, "internal server error")
 }
 
 func TestCreateAppointment_PastDate(t *testing.T) {
@@ -604,15 +640,7 @@ func TestCreateAppointment_PastDate(t *testing.T) {
 		)
 	}
 
-	if !strings.Contains(
-		recorder.Body.String(),
-		"appointment must be scheduled in the future",
-	) {
-		t.Fatalf(
-			"expected past date message, got %s",
-			recorder.Body.String(),
-		)
-	}
+	assertErrorResponse(t, recorder, "appointment must be scheduled in the future")
 }
 
 func TestGetAvailability_PastDateReturnsEmptyList(t *testing.T) {
