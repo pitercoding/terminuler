@@ -18,6 +18,33 @@ type mockAppointmentRepository struct {
 	createCalled bool
 }
 
+type mockEmailSender struct {
+	sendCalled      bool
+	to              string
+	customerName    string
+	appointmentDate string
+	startTime       string
+	endTime         string
+	err             error
+}
+
+func (m *mockEmailSender) SendConfirmation(
+	to string,
+	customerName string,
+	appointmentDate string,
+	startTime string,
+	endTime string,
+) error {
+	m.sendCalled = true
+	m.to = to
+	m.customerName = customerName
+	m.appointmentDate = appointmentDate
+	m.startTime = startTime
+	m.endTime = endTime
+
+	return m.err
+}
+
 func (m *mockAppointmentRepository) GetByDate(
 	ctx context.Context,
 	date string,
@@ -741,8 +768,13 @@ func TestValidateCreateAppointment(t *testing.T) {
 
 func TestCreateAppointment_Success(t *testing.T) {
 	repository := &mockAppointmentRepository{}
+	emailSender := &mockEmailSender{}
 
-	service := NewAppointmentService(repository, fixedClock)
+	service := NewAppointmentServiceWithEmail(
+		repository,
+		emailSender,
+		fixedClock,
+	)
 
 	input := CreateAppointmentInput{
 		AppointmentDate: "2026-09-28",
@@ -802,6 +834,45 @@ func TestCreateAppointment_Success(t *testing.T) {
 		t.Errorf(
 			"expected end time 11:00, got %s",
 			appointment.EndTime,
+		)
+	}
+
+	if !emailSender.sendCalled {
+		t.Fatal("expected confirmation email to be sent")
+	}
+
+	if emailSender.to != "rc@exemple.com" {
+		t.Errorf(
+			"expected email recipient 'rc@exemple.com', got %q",
+			emailSender.to,
+		)
+	}
+
+	if emailSender.customerName != "Racha Cuca" {
+		t.Errorf(
+			"expected email customer name 'Racha Cuca', got %q",
+			emailSender.customerName,
+		)
+	}
+
+	if emailSender.appointmentDate != "2026-09-28" {
+		t.Errorf(
+			"expected email appointment date '2026-09-28', got %q",
+			emailSender.appointmentDate,
+		)
+	}
+
+	if emailSender.startTime != "10:00" {
+		t.Errorf(
+			"expected email start time '10:00', got %q",
+			emailSender.startTime,
+		)
+	}
+
+	if emailSender.endTime != "11:00" {
+		t.Errorf(
+			"expected email end time '11:00', got %q",
+			emailSender.endTime,
 		)
 	}
 }
@@ -1015,5 +1086,95 @@ func TestCreateAppointment_RepositoryError(t *testing.T) {
 
 	if appointment != nil {
 		t.Fatal("expected nil appointment, got an appointment")
+	}
+}
+
+func TestCreateAppointment_EmailErrorDoesNotFailAppointment(t *testing.T) {
+	repository := &mockAppointmentRepository{}
+
+	emailSender := &mockEmailSender{
+		err: errors.New("email provider unavailable"),
+	}
+
+	service := NewAppointmentServiceWithEmail(
+		repository,
+		emailSender,
+		fixedClock,
+	)
+
+	input := CreateAppointmentInput{
+		AppointmentDate: "2026-09-28",
+		StartTime:       "10:00",
+		EndTime:         "11:00",
+		CustomerName:    "Racha Cuca",
+		CustomerPhone:   "+5511999999999",
+		CustomerEmail:   "rc@exemple.com",
+	}
+
+	appointment, err := service.Create(
+		context.Background(),
+		input,
+	)
+
+	if err != nil {
+		t.Fatalf(
+			"expected appointment creation to succeed despite email error, got %v",
+			err,
+		)
+	}
+
+	if appointment == nil {
+		t.Fatal("expected appointment, got nil")
+	}
+
+	if appointment.ID != 1 {
+		t.Errorf(
+			"expected appointment ID 1, got %d",
+			appointment.ID,
+		)
+	}
+
+	if !emailSender.sendCalled {
+		t.Fatal("expected confirmation email to be attempted")
+	}
+}
+
+func TestCreateAppointment_DatabaseErrorDoesNotSendEmail(t *testing.T) {
+	repository := &mockAppointmentRepository{
+		err: errors.New("database connection failed"),
+	}
+
+	emailSender := &mockEmailSender{}
+
+	service := NewAppointmentServiceWithEmail(
+		repository,
+		emailSender,
+		fixedClock,
+	)
+
+	input := CreateAppointmentInput{
+		AppointmentDate: "2026-09-28",
+		StartTime:       "10:00",
+		EndTime:         "11:00",
+		CustomerName:    "Racha Cuca",
+		CustomerPhone:   "+5511999999999",
+		CustomerEmail:   "rc@exemple.com",
+	}
+
+	appointment, err := service.Create(
+		context.Background(),
+		input,
+	)
+
+	if err == nil {
+		t.Fatal("expected database error, got nil")
+	}
+
+	if appointment != nil {
+		t.Fatal("expected nil appointment, got an appointment")
+	}
+
+	if emailSender.sendCalled {
+		t.Fatal("expected email not to be sent when appointment creation fails")
 	}
 }

@@ -7,6 +7,7 @@ import (
 
 	"github.com/pitercoding/terminuler/internal/config"
 	"github.com/pitercoding/terminuler/internal/database"
+	"github.com/pitercoding/terminuler/internal/email"
 	"github.com/pitercoding/terminuler/internal/handlers"
 	"github.com/pitercoding/terminuler/internal/repositories"
 	"github.com/pitercoding/terminuler/internal/routes"
@@ -34,12 +35,25 @@ func main() {
 		log.Fatal(err)
 	}
 
+	resendAPIKey, err := config.ResendAPIKey()
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	resendFromEmail := config.ResendFromEmail()
+
 	mux := http.NewServeMux()
 
 	appointmentRepository := repositories.NewAppointmentRepository(db)
 
-	appointmentService := services.NewAppointmentService(
+	emailSender := email.NewResendSender(
+		resendAPIKey,
+		resendFromEmail,
+	)
+
+	appointmentService := services.NewAppointmentServiceWithEmail(
 		appointmentRepository,
+		emailSender,
 		func() time.Time {
 			return time.Now().In(location)
 		},

@@ -3,11 +3,13 @@ package services
 import (
 	"context"
 	"fmt"
+	"log"
 	"net/mail"
 	"strings"
 	"time"
 	"unicode/utf8"
 
+	"github.com/pitercoding/terminuler/internal/email"
 	"github.com/pitercoding/terminuler/internal/models"
 )
 
@@ -59,6 +61,7 @@ const (
 
 type AppointmentService struct {
 	repository AppointmentRepository
+	email      email.Sender
 	now        func() time.Time
 }
 
@@ -69,12 +72,28 @@ func NewAppointmentService(
 	repository AppointmentRepository,
 	now func() time.Time,
 ) *AppointmentService {
+	return NewAppointmentServiceWithEmail(
+		repository,
+		nil,
+		now,
+	)
+}
+
+// NewAppointmentServiceWithEmail is like NewAppointmentService but also sends
+// a confirmation email through emailSender after each successful booking.
+// A nil emailSender disables confirmation emails.
+func NewAppointmentServiceWithEmail(
+	repository AppointmentRepository,
+	emailSender email.Sender,
+	now func() time.Time,
+) *AppointmentService {
 	if now == nil {
 		now = time.Now
 	}
 
 	return &AppointmentService{
 		repository: repository,
+		email:      emailSender,
 		now:        now,
 	}
 }
@@ -203,6 +222,24 @@ func (s *AppointmentService) Create(
 
 	if err := s.repository.Create(ctx, appointment); err != nil {
 		return nil, fmt.Errorf("failed to create appointment: %w", err)
+	}
+
+	// The appointment is already stored, so an email failure is only logged:
+	// returning an error here would tell the client the booking failed.
+	if s.email != nil {
+		if err := s.email.SendConfirmation(
+			appointment.CustomerEmail,
+			appointment.CustomerName,
+			appointment.AppointmentDate.Format("2006-01-02"),
+			appointment.StartTime,
+			appointment.EndTime,
+		); err != nil {
+			log.Printf(
+				"failed to send confirmation email for appointment %d: %v",
+				appointment.ID,
+				err,
+			)
+		}
 	}
 
 	return appointment, nil
