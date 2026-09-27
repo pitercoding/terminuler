@@ -16,6 +16,8 @@ import (
 const (
 	defaultPort     = "8080"
 	defaultTimezone = "UTC"
+
+	defaultResendFromEmail = "onboarding@resend.dev"
 )
 
 // envFiles are the locations checked for a .env file, relative to the
@@ -54,6 +56,30 @@ func DatabaseURL() (string, error) {
 	}
 
 	return databaseURL, nil
+}
+
+// ResendAPIKey returns the API key used to send confirmation emails
+// (RESEND_API_KEY). It is required so a misconfigured deployment fails at
+// startup instead of silently skipping every confirmation email.
+func ResendAPIKey() (string, error) {
+	apiKey := os.Getenv("RESEND_API_KEY")
+
+	if apiKey == "" {
+		return "", fmt.Errorf("RESEND_API_KEY is not set")
+	}
+
+	return apiKey, nil
+}
+
+// ResendFromEmail returns the sender address used for confirmation emails
+// (RESEND_FROM_EMAIL), defaulting to Resend's testing address, which can
+// only deliver to the email of the Resend account owner.
+func ResendFromEmail() string {
+	if from := os.Getenv("RESEND_FROM_EMAIL"); from != "" {
+		return from
+	}
+
+	return defaultResendFromEmail
 }
 
 // Port returns the HTTP port (PORT), defaulting to 8080.

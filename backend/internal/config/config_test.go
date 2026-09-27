@@ -171,3 +171,36 @@ func TestLocation(t *testing.T) {
 		t.Fatal("expected error for invalid timezone")
 	}
 }
+
+func TestResendAPIKey(t *testing.T) {
+	t.Setenv("RESEND_API_KEY", "")
+
+	if _, err := ResendAPIKey(); err == nil {
+		t.Fatal("expected error when RESEND_API_KEY is empty")
+	}
+
+	t.Setenv("RESEND_API_KEY", "re_test_key")
+
+	apiKey, err := ResendAPIKey()
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+
+	if apiKey != "re_test_key" {
+		t.Fatalf("unexpected RESEND_API_KEY %q", apiKey)
+	}
+}
+
+func TestResendFromEmail(t *testing.T) {
+	t.Setenv("RESEND_FROM_EMAIL", "")
+
+	if from := ResendFromEmail(); from != defaultResendFromEmail {
+		t.Fatalf("expected default sender %q, got %q", defaultResendFromEmail, from)
+	}
+
+	t.Setenv("RESEND_FROM_EMAIL", "Terminuler <booking@example.com>")
+
+	if from := ResendFromEmail(); from != "Terminuler <booking@example.com>" {
+		t.Fatalf("unexpected RESEND_FROM_EMAIL %q", from)
+	}
+}
