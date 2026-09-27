@@ -5,6 +5,7 @@ import {
   AppointmentApiError,
   createAppointment,
   getAvailableSlots,
+  type Appointment,
   type AvailabilityResponse,
   type AvailableSlot,
 } from "@/services/appointmentService";
@@ -19,6 +20,8 @@ export default function Home() {
   const [customerName, setCustomerName] = useState("");
   const [customerPhone, setCustomerPhone] = useState("");
   const [customerEmail, setCustomerEmail] = useState("");
+  const [createdAppointment, setCreatedAppointment] =
+    useState<Appointment | null>(null);
 
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -80,7 +83,7 @@ export default function Home() {
     setLoading(true);
 
     try {
-      await createAppointment({
+      const appointment = await createAppointment({
         appointment_date: date,
         start_time: selectedSlot.start_time,
         end_time: selectedSlot.end_time,
@@ -89,7 +92,7 @@ export default function Home() {
         customer_email: customerEmail.trim(),
       });
 
-      console.log("Appointment created successfully");
+      setCreatedAppointment(appointment);
     } catch (err) {
       if (err instanceof AppointmentApiError && err.status === 409) {
         setError(
@@ -117,6 +120,45 @@ export default function Home() {
     } finally {
       setLoading(false);
     }
+  }
+
+  if (createdAppointment) {
+    return (
+      <main>
+        <h1>Appointment confirmed!</h1>
+
+        <p>Your appointment has been successfully booked.</p>
+
+        <section>
+          <h2>Appointment details</h2>
+
+          <p>
+            <strong>Date:</strong>{" "}
+            {createdAppointment.appointment_date}
+          </p>
+
+          <p>
+            <strong>Time:</strong>{" "}
+            {createdAppointment.start_time} -{" "}
+            {createdAppointment.end_time}
+          </p>
+
+          <p>
+            <strong>Name:</strong>{" "}
+            {createdAppointment.customer_name}
+          </p>
+
+          <p>
+            <strong>Email:</strong>{" "}
+            {createdAppointment.customer_email}
+          </p>
+
+          <p>
+            A confirmation email will be sent to this address.
+          </p>
+        </section>
+      </main>
+    );
   }
 
   return (
