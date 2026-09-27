@@ -2,6 +2,8 @@
 
 import { useState } from "react";
 import {
+  AppointmentApiError,
+  createAppointment,
   getAvailableSlots,
   type AvailabilityResponse,
   type AvailableSlot,
@@ -51,7 +53,7 @@ export default function Home() {
     setError(null);
   }
 
-  function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
+  async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
     if (!selectedSlot) {
@@ -75,15 +77,46 @@ export default function Home() {
     }
 
     setError(null);
+    setLoading(true);
 
-    console.log({
-      appointment_date: date,
-      start_time: selectedSlot.start_time,
-      end_time: selectedSlot.end_time,
-      customer_name: customerName,
-      customer_phone: customerPhone,
-      customer_email: customerEmail,
-    });
+    try {
+      await createAppointment({
+        appointment_date: date,
+        start_time: selectedSlot.start_time,
+        end_time: selectedSlot.end_time,
+        customer_name: customerName.trim(),
+        customer_phone: customerPhone.trim(),
+        customer_email: customerEmail.trim(),
+      });
+
+      console.log("Appointment created successfully");
+    } catch (err) {
+      if (err instanceof AppointmentApiError && err.status === 409) {
+        setError(
+          "This appointment slot is no longer available. Please select another time.",
+        );
+
+        try {
+          const data = await getAvailableSlots(date);
+
+          setAvailability(data);
+          setSelectedSlot(null);
+        } catch {
+          setAvailability(null);
+          setSelectedSlot(null);
+        }
+
+        return;
+      }
+
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Failed to create appointment.",
+      );
+    } finally {
+      setLoading(false);
+    }
   }
 
   return (
@@ -185,7 +218,9 @@ export default function Home() {
               />
             </div>
 
-            <button type="submit">Confirm appointment</button>
+            <button type="submit" disabled={loading}>
+              {loading ? "Confirming..." : "Confirm appointment"}
+            </button>
           </form>
         </section>
       )}
