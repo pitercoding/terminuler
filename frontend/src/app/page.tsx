@@ -187,8 +187,21 @@ export default function Home() {
     }
   }
 
-  if (createdAppointment) {
-    return <AppointmentSuccess appointment={createdAppointment} />;
+  function handleBookAnother() {
+    // Discard any availability request still in flight.
+    latestAvailabilityRequest.current++;
+
+    setDate("");
+    setAvailability(null);
+    setSelectedSlot(null);
+    setCustomer(emptyCustomer);
+    setCreatedAppointment(null);
+    setIsLoadingAvailability(false);
+    setAvailabilityError(null);
+    setConflictError(null);
+    setBookingError(null);
+
+    window.scrollTo({ top: 0 });
   }
 
   return (
@@ -197,64 +210,76 @@ export default function Home() {
         <p className="text-sm font-semibold uppercase tracking-[0.2em] text-teal-700">
           Terminuler
         </p>
-        <h1 className="mt-3 text-3xl font-semibold tracking-tight text-slate-900 sm:text-4xl">
-          Book your appointment
-        </h1>
-        <p className="mt-3 text-slate-600">
-          Choose a date and a convenient time for your visit.
-        </p>
+
+        {!createdAppointment && (
+          <>
+            <h1 className="mt-3 text-3xl font-semibold tracking-tight text-slate-900 sm:text-4xl">
+              Book your appointment
+            </h1>
+            <p className="mt-3 text-slate-600">
+              Choose a date and a convenient time for your visit.
+            </p>
+          </>
+        )}
       </header>
 
-      <div className="space-y-6">
-        <StepCard step={1} title="Choose a date">
-          <DateSelector
-            date={date}
-            disabled={isBooking}
-            onDateChange={handleDateChange}
-          />
-
-          {conflictError && (
-            <div ref={conflictRef} className="mt-6">
-              <ErrorMessage message={conflictError} />
-            </div>
-          )}
-
-          {availabilityError && (
-            <div className="mt-6">
-              <ErrorMessage
-                message={availabilityError}
-                onRetry={() => void loadAvailability(date)}
-              />
-            </div>
-          )}
-
-          {isLoadingAvailability && <TimeSlotGridSkeleton />}
-
-          {availability && (
-            <TimeSlotGrid
-              slots={availability.available_slots}
-              selectedSlot={selectedSlot}
-              disabled={isBooking}
-              onSelect={handleSlotSelect}
-            />
-          )}
-        </StepCard>
-
-        {selectedSlot && (
-          <StepCard step={2} title="Your information">
-            <AppointmentForm
+      {createdAppointment ? (
+        <AppointmentSuccess
+          appointment={createdAppointment}
+          onBookAnother={handleBookAnother}
+        />
+      ) : (
+        <div className="space-y-6">
+          <StepCard step={1} title="Choose a date">
+            <DateSelector
               date={date}
-              slot={selectedSlot}
-              customer={customer}
-              error={bookingError}
-              isSubmitting={isBooking}
-              onCustomerChange={setCustomer}
-              onChangeTime={handleChangeTime}
-              onSubmit={handleSubmit}
+              disabled={isBooking}
+              onDateChange={handleDateChange}
             />
+
+            {conflictError && (
+              <div ref={conflictRef} className="mt-6">
+                <ErrorMessage message={conflictError} />
+              </div>
+            )}
+
+            {availabilityError && (
+              <div className="mt-6">
+                <ErrorMessage
+                  message={availabilityError}
+                  onRetry={() => void loadAvailability(date)}
+                />
+              </div>
+            )}
+
+            {isLoadingAvailability && <TimeSlotGridSkeleton />}
+
+            {availability && (
+              <TimeSlotGrid
+                slots={availability.available_slots}
+                selectedSlot={selectedSlot}
+                disabled={isBooking}
+                onSelect={handleSlotSelect}
+              />
+            )}
           </StepCard>
-        )}
-      </div>
+
+          {selectedSlot && (
+            <StepCard step={2} title="Your information">
+              <AppointmentForm
+                date={date}
+                slot={selectedSlot}
+                customer={customer}
+                error={bookingError}
+                isSubmitting={isBooking}
+                onCustomerChange={setCustomer}
+                onChangeTime={handleChangeTime}
+                onSubmit={handleSubmit}
+              />
+            </StepCard>
+          )}
+        </div>
+      )}
     </main>
   );
 }
