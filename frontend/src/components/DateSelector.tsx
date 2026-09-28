@@ -1,19 +1,16 @@
+import { inputClassName, labelClassName } from "@/components/styles";
+
 interface DateSelectorProps {
   date: string;
-  isSearching: boolean;
   onDateChange: (date: string) => void;
-  onSearch: () => void;
 }
 
-export function DateSelector({
-  date,
-  isSearching,
-  onDateChange,
-  onSearch,
-}: DateSelectorProps) {
+export function DateSelector({ date, onDateChange }: DateSelectorProps) {
   return (
     <div>
-      <label htmlFor="appointment-date">Select a date</label>
+      <label htmlFor="appointment-date" className={labelClassName}>
+        Date
+      </label>
 
       <input
         id="appointment-date"
@@ -21,11 +18,14 @@ export function DateSelector({
         value={date}
         min={new Date().toISOString().split("T")[0]}
         onChange={(event) => onDateChange(event.target.value)}
+        className={`${inputClassName} sm:max-w-xs`}
       />
 
-      <button type="button" onClick={onSearch} disabled={isSearching}>
-        {isSearching ? "Searching..." : "Search availability"}
-      </button>
+      {!date && (
+        <p className="mt-2 text-sm text-slate-500">
+          Choose a date to see the available times.
+        </p>
+      )}
     </div>
   );
 }

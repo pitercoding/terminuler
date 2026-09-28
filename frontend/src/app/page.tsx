@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import {
   AppointmentForm,
   type CustomerDetails,
@@ -8,6 +8,7 @@ import {
 import { AppointmentSuccess } from "@/components/AppointmentSuccess";
 import { DateSelector } from "@/components/DateSelector";
 import { ErrorMessage } from "@/components/ErrorMessage";
+import { StepCard } from "@/components/StepCard";
 import { TimeSlotGrid } from "@/components/TimeSlotGrid";
 import {
   AppointmentApiError,
@@ -31,7 +32,8 @@ export default function Home() {
   const [selectedSlot, setSelectedSlot] =
     useState<AvailableSlot | null>(null);
 
-  // Kept here rather than in the form so the details survive when the form is hidden, for example after a 409 conflict clears the selected slot.
+  // Kept here rather than in the form so the details survive when the form
+  // is hidden, for example after a 409 conflict clears the selected slot.
   const [customer, setCustomer] = useState<CustomerDetails>(emptyCustomer);
   const [createdAppointment, setCreatedAppointment] =
     useState<Appointment | null>(null);
@@ -39,40 +41,57 @@ export default function Home() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
+  // Availability is fetched on every date change, so responses can arrive
+  // out of order. Only the response of the latest request is applied.
+  const latestAvailabilityRequest = useRef(0);
+
+  async function loadAvailability(forDate: string) {
+    const requestId = ++latestAvailabilityRequest.current;
+
+    setLoading(true);
+
+    try {
+      const data = await getAvailableSlots(forDate);
+
+      if (requestId === latestAvailabilityRequest.current) {
+        setAvailability(data);
+      }
+    } catch (err) {
+      if (requestId === latestAvailabilityRequest.current) {
+        setError(
+          err instanceof Error ? err.message : "Failed to fetch availability.",
+        );
+      }
+    } finally {
+      if (requestId === latestAvailabilityRequest.current) {
+        setLoading(false);
+      }
+    }
+  }
+
   function handleDateChange(newDate: string) {
     setDate(newDate);
     setSelectedSlot(null);
     setAvailability(null);
     setError(null);
-  }
 
-  async function handleSearch() {
-    if (!date) {
-      setError("Please select a date.");
-      setAvailability(null);
-      setSelectedSlot(null);
+    if (!newDate) {
+      // Discard any request still in flight for the previous date.
+      latestAvailabilityRequest.current++;
+      setLoading(false);
       return;
     }
 
-    setLoading(true);
-    setError(null);
-    setAvailability(null);
-    setSelectedSlot(null);
-
-    try {
-      const data = await getAvailableSlots(date);
-      setAvailability(data);
-    } catch (err) {
-      setError(
-        err instanceof Error ? err.message : "Failed to fetch availability.",
-      );
-    } finally {
-      setLoading(false);
-    }
+    void loadAvailability(newDate);
   }
 
   function handleSlotSelect(slot: AvailableSlot) {
     setSelectedSlot(slot);
+    setError(null);
+  }
+
+  function handleChangeTime() {
+    setSelectedSlot(null);
     setError(null);
   }
 
@@ -143,35 +162,54 @@ export default function Home() {
   }
 
   return (
-    <main>
-      <h1>Book an appointment</h1>
-
-      <DateSelector
-        date={date}
-        isSearching={loading}
-        onDateChange={handleDateChange}
-        onSearch={handleSearch}
-      />
+    <main className="mx-auto w-full max-w-2xl px-4 py-12 sm:py-16">
+      <header className="mb-10 text-center">
+        <p className="text-sm font-semibold uppercase tracking-[0.2em] text-teal-700">
+          Terminuler
+        </p>
+        <h1 className="mt-3 text-3xl font-semibold tracking-tight text-slate-900 sm:text-4xl">
+          Book your appointment
+        </h1>
+        <p className="mt-3 text-slate-600">
+          Choose a date and a convenient time for your visit.
+        </p>
+      </header>
 
       {error && <ErrorMessage message={error} />}
 
-      {availability && (
-        <TimeSlotGrid
-          slots={availability.available_slots}
-          selectedSlot={selectedSlot}
-          onSelect={handleSlotSelect}
-        />
-      )}
+      <div className="space-y-6">
+        <StepCard step={1} title="Choose a date">
+          <DateSelector date={date} onDateChange={handleDateChange} />
 
-      {selectedSlot && (
-        <AppointmentForm
-          slot={selectedSlot}
-          customer={customer}
-          isSubmitting={loading}
-          onCustomerChange={setCustomer}
-          onSubmit={handleSubmit}
-        />
-      )}
+          {loading && !availability && (
+            <p className="mt-8 text-sm text-slate-500">
+              Loading available times...
+            </p>
+          )}
+
+          {availability && (
+            <TimeSlotGrid
+              slots={availability.available_slots}
+              selectedSlot={selectedSlot}
+              onSelect={handleSlotSelect}
+            />
+          )}
+        </StepCard>
+
+        {selectedSlot && (
+          <StepCard step={2} title="Your information">
+            <AppointmentForm
+              date={date}
+              slot={selectedSlot}
+              customer={customer}
+              isSubmitting={loading}
+              onCustomerChange={setCustomer}
+              onChangeTime={handleChangeTime}
+              onSubmit={handleSubmit}
+            />
+          </StepCard>
+        )}
+      </div>
     </main>
   );
 }
