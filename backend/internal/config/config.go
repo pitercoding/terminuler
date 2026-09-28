@@ -4,7 +4,10 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"net/netip"
 	"os"
+	"strconv"
+	"strings"
 	"time"
 	// Embeds the timezone database so APP_TIMEZONE works on hosts
 	// without one (Windows, minimal Docker images).
@@ -18,6 +21,8 @@ const (
 	defaultTimezone = "UTC"
 
 	defaultResendFromEmail = "onboarding@resend.dev"
+
+	defaultAppointmentRateLimit = 5
 )
 
 // envFiles are the locations checked for a .env file, relative to the
@@ -89,6 +94,77 @@ func Port() string {
 	}
 
 	return defaultPort
+}
+
+// AppointmentRateLimit returns how many appointments a single client may
+// create per minute (APPOINTMENT_RATE_LIMIT), defaulting to 5.
+func AppointmentRateLimit() (int, error) {
+	value := os.Getenv("APPOINTMENT_RATE_LIMIT")
+
+	if value == "" {
+		return defaultAppointmentRateLimit, nil
+	}
+
+	limit, err := strconv.Atoi(value)
+	if err != nil || limit < 1 {
+		return 0, fmt.Errorf(
+			"invalid APPOINTMENT_RATE_LIMIT %q: must be a positive integer",
+			value,
+		)
+	}
+
+	return limit, nil
+}
+
+// TrustedProxies returns the networks allowed to report the client IP in
+// the X-Real-IP header (TRUSTED_PROXIES), as a comma-separated list of
+// CIDRs or single IPs. It is empty by default, so the header is ignored
+// unless the proxy in front of the API is explicitly trusted.
+func TrustedProxies() ([]netip.Prefix, error) {
+	value := os.Getenv("TRUSTED_PROXIES")
+
+	if value == "" {
+		return nil, nil
+	}
+
+	var prefixes []netip.Prefix
+
+	for entry := range strings.SplitSeq(value, ",") {
+		entry = strings.TrimSpace(entry)
+
+		if entry == "" {
+			continue
+		}
+
+		prefix, err := parsePrefix(entry)
+		if err != nil {
+			return nil, fmt.Errorf("invalid TRUSTED_PROXIES entry %q: %w", entry, err)
+		}
+
+		prefixes = append(prefixes, prefix)
+	}
+
+	return prefixes, nil
+}
+
+// parsePrefix accepts a CIDR or a single IP, which becomes a prefix that
+// matches only that address.
+func parsePrefix(value string) (netip.Prefix, error) {
+	if strings.Contains(value, "/") {
+		prefix, err := netip.ParsePrefix(value)
+		if err != nil {
+			return netip.Prefix{}, err
+		}
+
+		return prefix.Masked(), nil
+	}
+
+	addr, err := netip.ParseAddr(value)
+	if err != nil {
+		return netip.Prefix{}, err
+	}
+
+	return netip.PrefixFrom(addr, addr.BitLen()), nil
 }
 
 // Location returns the timezone used for business hours (APP_TIMEZONE),

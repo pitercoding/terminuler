@@ -31,7 +31,9 @@ func (s *stubAppointmentRepository) Create(
 	return nil
 }
 
-func newTestMux() *http.ServeMux {
+func newTestMux(
+	createAppointmentLimit func(http.Handler) http.Handler,
+) *http.ServeMux {
 	service := services.NewAppointmentService(
 		&stubAppointmentRepository{},
 		func() time.Time {
@@ -41,9 +43,50 @@ func newTestMux() *http.ServeMux {
 
 	mux := http.NewServeMux()
 
-	RegisterRoutes(mux, handlers.NewAppointmentHandler(service))
+	RegisterRoutes(
+		mux,
+		handlers.NewAppointmentHandler(service),
+		createAppointmentLimit,
+	)
 
 	return mux
+}
+
+func noLimit(next http.Handler) http.Handler {
+	return next
+}
+
+// rejectAll stands in for a rate limit that is already exceeded.
+func rejectAll(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusTooManyRequests)
+	})
+}
+
+func TestRoutes_RateLimitAppliesOnlyToCreateAppointment(t *testing.T) {
+	mux := newTestMux(rejectAll)
+
+	tests := []struct {
+		method         string
+		path           string
+		expectedStatus int
+	}{
+		{http.MethodPost, "/appointments", http.StatusTooManyRequests},
+		{http.MethodGet, "/appointments/availability?date=2026-09-28", http.StatusOK},
+		{http.MethodGet, "/health", http.StatusOK},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.method+" "+tt.path, func(t *testing.T) {
+			recorder := httptest.NewRecorder()
+
+			mux.ServeHTTP(recorder, httptest.NewRequest(tt.method, tt.path, nil))
+
+			if recorder.Code != tt.expectedStatus {
+				t.Fatalf("expected status %d, got %d", tt.expectedStatus, recorder.Code)
+			}
+		})
+	}
 }
 
 func TestRoutes(t *testing.T) {
@@ -125,7 +168,7 @@ func TestRoutes(t *testing.T) {
 		},
 	}
 
-	mux := newTestMux()
+	mux := newTestMux(noLimit)
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

@@ -9,9 +9,13 @@ import (
 // RegisterRoutes uses method-aware patterns (Go 1.22+): requests with any
 // other method get 405 Method Not Allowed with an Allow header, and GET
 // routes also answer HEAD.
+//
+// createAppointmentLimit wraps only POST /appointments, the one route that
+// writes data and sends an email; reads are left unlimited.
 func RegisterRoutes(
 	mux *http.ServeMux,
 	appointmentHandler *handlers.AppointmentHandler,
+	createAppointmentLimit func(http.Handler) http.Handler,
 ) {
 	mux.HandleFunc("GET /health", handlers.HealthHandler)
 
@@ -20,8 +24,10 @@ func RegisterRoutes(
 		appointmentHandler.GetAvailability,
 	)
 
-	mux.HandleFunc(
+	mux.Handle(
 		"POST /appointments",
-		appointmentHandler.CreateAppointment,
+		createAppointmentLimit(
+			http.HandlerFunc(appointmentHandler.CreateAppointment),
+		),
 	)
 }

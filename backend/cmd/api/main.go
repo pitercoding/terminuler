@@ -15,6 +15,7 @@ import (
 	"github.com/pitercoding/terminuler/internal/database"
 	"github.com/pitercoding/terminuler/internal/email"
 	"github.com/pitercoding/terminuler/internal/handlers"
+	"github.com/pitercoding/terminuler/internal/ratelimit"
 	"github.com/pitercoding/terminuler/internal/repositories"
 	"github.com/pitercoding/terminuler/internal/routes"
 	"github.com/pitercoding/terminuler/internal/services"
@@ -35,6 +36,9 @@ const (
 
 	// shutdownTimeout is how long in-flight requests have to finish after a shutdown signal before the server stops anyway.
 	shutdownTimeout = 15 * time.Second
+
+	// rateLimitWindow is the period APPOINTMENT_RATE_LIMIT applies to.
+	rateLimitWindow = time.Minute
 )
 
 func main() {
@@ -72,6 +76,16 @@ func run() error {
 
 	resendFromEmail := config.ResendFromEmail()
 
+	appointmentRateLimit, err := config.AppointmentRateLimit()
+	if err != nil {
+		return err
+	}
+
+	trustedProxies, err := config.TrustedProxies()
+	if err != nil {
+		return err
+	}
+
 	mux := http.NewServeMux()
 
 	appointmentRepository := repositories.NewAppointmentRepository(db)
@@ -93,9 +107,19 @@ func run() error {
 		appointmentService,
 	)
 
+	createAppointmentLimit := ratelimit.Middleware(
+		ratelimit.NewLimiter(
+			appointmentRateLimit,
+			rateLimitWindow,
+			time.Now,
+		),
+		ratelimit.NewClientIPResolver(trustedProxies),
+	)
+
 	routes.RegisterRoutes(
 		mux,
 		appointmentHandler,
+		createAppointmentLimit,
 	)
 
 	port := config.Port()

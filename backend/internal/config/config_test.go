@@ -204,3 +204,75 @@ func TestResendFromEmail(t *testing.T) {
 		t.Fatalf("unexpected RESEND_FROM_EMAIL %q", from)
 	}
 }
+
+func TestAppointmentRateLimit(t *testing.T) {
+	t.Setenv("APPOINTMENT_RATE_LIMIT", "")
+
+	limit, err := AppointmentRateLimit()
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+
+	if limit != defaultAppointmentRateLimit {
+		t.Fatalf("expected default limit %d, got %d", defaultAppointmentRateLimit, limit)
+	}
+
+	t.Setenv("APPOINTMENT_RATE_LIMIT", "10")
+
+	limit, err = AppointmentRateLimit()
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+
+	if limit != 10 {
+		t.Fatalf("expected limit 10, got %d", limit)
+	}
+
+	for _, invalid := range []string{"0", "-1", "abc", "1.5"} {
+		t.Setenv("APPOINTMENT_RATE_LIMIT", invalid)
+
+		if _, err := AppointmentRateLimit(); err == nil {
+			t.Fatalf("expected error for APPOINTMENT_RATE_LIMIT %q", invalid)
+		}
+	}
+}
+
+func TestTrustedProxies(t *testing.T) {
+	t.Setenv("TRUSTED_PROXIES", "")
+
+	proxies, err := TrustedProxies()
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+
+	if len(proxies) != 0 {
+		t.Fatalf("expected no trusted proxies by default, got %v", proxies)
+	}
+
+	t.Setenv("TRUSTED_PROXIES", "127.0.0.1/32, ::1/128,10.1.2.3/8,, 192.168.0.10")
+
+	proxies, err = TrustedProxies()
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+
+	expected := []string{"127.0.0.1/32", "::1/128", "10.0.0.0/8", "192.168.0.10/32"}
+
+	if len(proxies) != len(expected) {
+		t.Fatalf("expected %d proxies, got %v", len(expected), proxies)
+	}
+
+	for i, prefix := range proxies {
+		if prefix.String() != expected[i] {
+			t.Errorf("expected proxy %d to be %s, got %s", i, expected[i], prefix)
+		}
+	}
+
+	for _, invalid := range []string{"localhost", "10.0.0.0/33", "300.0.0.1"} {
+		t.Setenv("TRUSTED_PROXIES", invalid)
+
+		if _, err := TrustedProxies(); err == nil {
+			t.Fatalf("expected error for TRUSTED_PROXIES %q", invalid)
+		}
+	}
+}
