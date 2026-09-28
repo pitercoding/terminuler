@@ -2,6 +2,14 @@
 
 import { useState } from "react";
 import {
+  AppointmentForm,
+  type CustomerDetails,
+} from "@/components/AppointmentForm";
+import { AppointmentSuccess } from "@/components/AppointmentSuccess";
+import { DateSelector } from "@/components/DateSelector";
+import { ErrorMessage } from "@/components/ErrorMessage";
+import { TimeSlotGrid } from "@/components/TimeSlotGrid";
+import {
   AppointmentApiError,
   createAppointment,
   getAvailableSlots,
@@ -10,6 +18,12 @@ import {
   type AvailableSlot,
 } from "@/services/appointmentService";
 
+const emptyCustomer: CustomerDetails = {
+  name: "",
+  phone: "",
+  email: "",
+};
+
 export default function Home() {
   const [date, setDate] = useState("");
   const [availability, setAvailability] =
@@ -17,14 +31,20 @@ export default function Home() {
   const [selectedSlot, setSelectedSlot] =
     useState<AvailableSlot | null>(null);
 
-  const [customerName, setCustomerName] = useState("");
-  const [customerPhone, setCustomerPhone] = useState("");
-  const [customerEmail, setCustomerEmail] = useState("");
+  // Kept here rather than in the form so the details survive when the form is hidden, for example after a 409 conflict clears the selected slot.
+  const [customer, setCustomer] = useState<CustomerDetails>(emptyCustomer);
   const [createdAppointment, setCreatedAppointment] =
     useState<Appointment | null>(null);
 
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+
+  function handleDateChange(newDate: string) {
+    setDate(newDate);
+    setSelectedSlot(null);
+    setAvailability(null);
+    setError(null);
+  }
 
   async function handleSearch() {
     if (!date) {
@@ -56,25 +76,23 @@ export default function Home() {
     setError(null);
   }
 
-  async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-
+  async function handleSubmit() {
     if (!selectedSlot) {
       setError("Please select an appointment time.");
       return;
     }
 
-    if (!customerName.trim()) {
+    if (!customer.name.trim()) {
       setError("Please enter your full name.");
       return;
     }
 
-    if (!customerPhone.trim()) {
+    if (!customer.phone.trim()) {
       setError("Please enter your phone number.");
       return;
     }
 
-    if (!customerEmail.trim()) {
+    if (!customer.email.trim()) {
       setError("Please enter your email address.");
       return;
     }
@@ -87,9 +105,9 @@ export default function Home() {
         appointment_date: date,
         start_time: selectedSlot.start_time,
         end_time: selectedSlot.end_time,
-        customer_name: customerName.trim(),
-        customer_phone: customerPhone.trim(),
-        customer_email: customerEmail.trim(),
+        customer_name: customer.name.trim(),
+        customer_phone: customer.phone.trim(),
+        customer_email: customer.email.trim(),
       });
 
       setCreatedAppointment(appointment);
@@ -113,9 +131,7 @@ export default function Home() {
       }
 
       setError(
-        err instanceof Error
-          ? err.message
-          : "Failed to create appointment.",
+        err instanceof Error ? err.message : "Failed to create appointment.",
       );
     } finally {
       setLoading(false);
@@ -123,148 +139,38 @@ export default function Home() {
   }
 
   if (createdAppointment) {
-    return (
-      <main>
-        <h1>Appointment confirmed!</h1>
-
-        <p>Your appointment has been successfully booked.</p>
-
-        <section>
-          <h2>Appointment details</h2>
-
-          <p>
-            <strong>Date:</strong>{" "}
-            {createdAppointment.appointment_date}
-          </p>
-
-          <p>
-            <strong>Time:</strong>{" "}
-            {createdAppointment.start_time} -{" "}
-            {createdAppointment.end_time}
-          </p>
-
-          <p>
-            <strong>Name:</strong>{" "}
-            {createdAppointment.customer_name}
-          </p>
-
-          <p>
-            <strong>Email:</strong>{" "}
-            {createdAppointment.customer_email}
-          </p>
-
-          <p>
-            A confirmation email will be sent to this address.
-          </p>
-        </section>
-      </main>
-    );
+    return <AppointmentSuccess appointment={createdAppointment} />;
   }
 
   return (
     <main>
       <h1>Book an appointment</h1>
 
-      <div>
-        <label htmlFor="appointment-date">Select a date</label>
+      <DateSelector
+        date={date}
+        isSearching={loading}
+        onDateChange={handleDateChange}
+        onSearch={handleSearch}
+      />
 
-        <input
-          id="appointment-date"
-          type="date"
-          value={date}
-          min={new Date().toISOString().split("T")[0]}
-          onChange={(event) => {
-            setDate(event.target.value);
-            setSelectedSlot(null);
-            setAvailability(null);
-            setError(null);
-          }}
-        />
-
-        <button type="button" onClick={handleSearch} disabled={loading}>
-          {loading ? "Searching..." : "Search availability"}
-        </button>
-      </div>
-
-      {error && <p>{error}</p>}
+      {error && <ErrorMessage message={error} />}
 
       {availability && (
-        <section>
-          <h2>Available times</h2>
-
-          {availability.available_slots.length === 0 ? (
-            <p>No appointments available for this date.</p>
-          ) : (
-            <div>
-              {availability.available_slots.map((slot) => {
-                const isSelected =
-                  selectedSlot?.start_time === slot.start_time &&
-                  selectedSlot?.end_time === slot.end_time;
-
-                return (
-                  <button
-                    key={slot.start_time}
-                    type="button"
-                    onClick={() => handleSlotSelect(slot)}
-                    aria-pressed={isSelected}
-                  >
-                    {slot.start_time} - {slot.end_time}
-                  </button>
-                );
-              })}
-            </div>
-          )}
-        </section>
+        <TimeSlotGrid
+          slots={availability.available_slots}
+          selectedSlot={selectedSlot}
+          onSelect={handleSlotSelect}
+        />
       )}
 
       {selectedSlot && (
-        <section>
-          <h2>Appointment details</h2>
-
-          <p>
-            Selected time: {selectedSlot.start_time} -{" "}
-            {selectedSlot.end_time}
-          </p>
-
-          <form onSubmit={handleSubmit}>
-            <div>
-              <label htmlFor="customer-name">Full name</label>
-              <input
-                id="customer-name"
-                type="text"
-                value={customerName}
-                onChange={(event) => setCustomerName(event.target.value)}
-                placeholder="Your full name"
-              />
-            </div>
-
-            <div>
-              <label htmlFor="customer-phone">Phone</label>
-              <input
-                id="customer-phone"
-                type="tel"
-                value={customerPhone}
-                onChange={(event) => setCustomerPhone(event.target.value)}
-                placeholder="Your phone number"
-              />
-            </div>
-
-            <div>
-              <label htmlFor="customer-email">Email</label>
-              <input
-                id="customer-email"
-                type="email"
-                value={customerEmail}
-                onChange={(event) => setCustomerEmail(event.target.value)}
-                placeholder="you@example.com"
-              />
-            </div>
-
-            <button type="submit" disabled={loading}>
-              {loading ? "Confirming..." : "Confirm appointment"}
-            </button>
-          </form>
-        </section>
+        <AppointmentForm
+          slot={selectedSlot}
+          customer={customer}
+          isSubmitting={loading}
+          onCustomerChange={setCustomer}
+          onSubmit={handleSubmit}
+        />
       )}
     </main>
   );
