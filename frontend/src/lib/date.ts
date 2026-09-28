@@ -14,3 +14,17 @@ export function formatDisplayDate(date: string): string {
     day: "numeric",
   });
 }
+
+/**
+ * Returns today's date in the browser's timezone as YYYY-MM-DD.
+ * toISOString() is not used because it returns the date in UTC.
+ */
+export function getTodayDate(): string {
+  const today = new Date();
+
+  const year = today.getFullYear();
+  const month = String(today.getMonth() + 1).padStart(2, "0");
+  const day = String(today.getDate()).padStart(2, "0");
+
+  return `${year}-${month}-${day}`;
+}

@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   AppointmentForm,
   type CustomerDetails,
@@ -9,7 +9,11 @@ import { AppointmentSuccess } from "@/components/AppointmentSuccess";
 import { DateSelector } from "@/components/DateSelector";
 import { ErrorMessage } from "@/components/ErrorMessage";
 import { StepCard } from "@/components/StepCard";
-import { TimeSlotGrid } from "@/components/TimeSlotGrid";
+import {
+  TimeSlotGrid,
+  TimeSlotGridSkeleton,
+} from "@/components/TimeSlotGrid";
+import { scrollIntoView } from "@/lib/scroll";
 import {
   AppointmentApiError,
   createAppointment,
@@ -25,6 +29,28 @@ const emptyCustomer: CustomerDetails = {
   email: "",
 };
 
+const availabilityErrorMessage =
+  "Unable to load available times. Please try again.";
+
+const conflictMessage =
+  "This time slot is no longer available. Please choose another time.";
+
+const bookingErrorMessage =
+  "We couldn't confirm your appointment. Please try again.";
+
+/**
+ * Returns the message shown when a booking fails. Validation errors (400)
+ * explain what to fix, so the API message is shown; anything else gets a
+ * generic message instead of technical details.
+ */
+function bookingFailureMessage(err: unknown): string {
+  if (err instanceof AppointmentApiError && err.status === 400) {
+    return `${err.message.charAt(0).toUpperCase()}${err.message.slice(1)}.`;
+  }
+
+  return bookingErrorMessage;
+}
+
 export default function Home() {
   const [date, setDate] = useState("");
   const [availability, setAvailability] =
@@ -38,17 +64,36 @@ export default function Home() {
   const [createdAppointment, setCreatedAppointment] =
     useState<Appointment | null>(null);
 
-  const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [isLoadingAvailability, setIsLoadingAvailability] = useState(false);
+  const [isBooking, setIsBooking] = useState(false);
+
+  // Each error is shown next to the step it belongs to.
+  const [availabilityError, setAvailabilityError] = useState<string | null>(
+    null,
+  );
+  const [conflictError, setConflictError] = useState<string | null>(null);
+  const [bookingError, setBookingError] = useState<string | null>(null);
 
   // Availability is fetched on every date change, so responses can arrive
   // out of order. Only the response of the latest request is applied.
   const latestAvailabilityRequest = useRef(0);
 
+  // After a conflict the form disappears, so the message above the time
+  // slots is brought into view; on small screens it would be off-screen.
+  const conflictRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (conflictError) {
+      scrollIntoView(conflictRef.current, "center");
+    }
+  }, [conflictError]);
+
   async function loadAvailability(forDate: string) {
     const requestId = ++latestAvailabilityRequest.current;
 
-    setLoading(true);
+    setAvailability(null);
+    setAvailabilityError(null);
+    setIsLoadingAvailability(true);
 
     try {
       const data = await getAvailableSlots(forDate);
@@ -56,15 +101,13 @@ export default function Home() {
       if (requestId === latestAvailabilityRequest.current) {
         setAvailability(data);
       }
-    } catch (err) {
+    } catch {
       if (requestId === latestAvailabilityRequest.current) {
-        setError(
-          err instanceof Error ? err.message : "Failed to fetch availability.",
-        );
+        setAvailabilityError(availabilityErrorMessage);
       }
     } finally {
       if (requestId === latestAvailabilityRequest.current) {
-        setLoading(false);
+        setIsLoadingAvailability(false);
       }
     }
   }
@@ -72,13 +115,15 @@ export default function Home() {
   function handleDateChange(newDate: string) {
     setDate(newDate);
     setSelectedSlot(null);
-    setAvailability(null);
-    setError(null);
+    setConflictError(null);
+    setBookingError(null);
 
     if (!newDate) {
       // Discard any request still in flight for the previous date.
       latestAvailabilityRequest.current++;
-      setLoading(false);
+      setAvailability(null);
+      setAvailabilityError(null);
+      setIsLoadingAvailability(false);
       return;
     }
 
@@ -87,37 +132,33 @@ export default function Home() {
 
   function handleSlotSelect(slot: AvailableSlot) {
     setSelectedSlot(slot);
-    setError(null);
+    setConflictError(null);
+    setBookingError(null);
   }
 
   function handleChangeTime() {
     setSelectedSlot(null);
-    setError(null);
+    setBookingError(null);
   }
 
   async function handleSubmit() {
     if (!selectedSlot) {
-      setError("Please select an appointment time.");
       return;
     }
 
-    if (!customer.name.trim()) {
-      setError("Please enter your full name.");
+    // The inputs are required, but a value made only of spaces passes the
+    // browser's validation.
+    if (
+      !customer.name.trim() ||
+      !customer.phone.trim() ||
+      !customer.email.trim()
+    ) {
+      setBookingError("Please fill in your name, email and phone.");
       return;
     }
 
-    if (!customer.phone.trim()) {
-      setError("Please enter your phone number.");
-      return;
-    }
-
-    if (!customer.email.trim()) {
-      setError("Please enter your email address.");
-      return;
-    }
-
-    setError(null);
-    setLoading(true);
+    setBookingError(null);
+    setIsBooking(true);
 
     try {
       const appointment = await createAppointment({
@@ -132,28 +173,17 @@ export default function Home() {
       setCreatedAppointment(appointment);
     } catch (err) {
       if (err instanceof AppointmentApiError && err.status === 409) {
-        setError(
-          "This appointment slot is no longer available. Please select another time.",
-        );
-
-        try {
-          const data = await getAvailableSlots(date);
-
-          setAvailability(data);
-          setSelectedSlot(null);
-        } catch {
-          setAvailability(null);
-          setSelectedSlot(null);
-        }
-
+        // The slot was taken by someone else: go back to the time slots,
+        // which are reloaded so the taken slot disappears.
+        setSelectedSlot(null);
+        setConflictError(conflictMessage);
+        void loadAvailability(date);
         return;
       }
 
-      setError(
-        err instanceof Error ? err.message : "Failed to create appointment.",
-      );
+      setBookingError(bookingFailureMessage(err));
     } finally {
-      setLoading(false);
+      setIsBooking(false);
     }
   }
 
@@ -175,22 +205,36 @@ export default function Home() {
         </p>
       </header>
 
-      {error && <ErrorMessage message={error} />}
-
       <div className="space-y-6">
         <StepCard step={1} title="Choose a date">
-          <DateSelector date={date} onDateChange={handleDateChange} />
+          <DateSelector
+            date={date}
+            disabled={isBooking}
+            onDateChange={handleDateChange}
+          />
 
-          {loading && !availability && (
-            <p className="mt-8 text-sm text-slate-500">
-              Loading available times...
-            </p>
+          {conflictError && (
+            <div ref={conflictRef} className="mt-6">
+              <ErrorMessage message={conflictError} />
+            </div>
           )}
+
+          {availabilityError && (
+            <div className="mt-6">
+              <ErrorMessage
+                message={availabilityError}
+                onRetry={() => void loadAvailability(date)}
+              />
+            </div>
+          )}
+
+          {isLoadingAvailability && <TimeSlotGridSkeleton />}
 
           {availability && (
             <TimeSlotGrid
               slots={availability.available_slots}
               selectedSlot={selectedSlot}
+              disabled={isBooking}
               onSelect={handleSlotSelect}
             />
           )}
@@ -202,7 +246,8 @@ export default function Home() {
               date={date}
               slot={selectedSlot}
               customer={customer}
-              isSubmitting={loading}
+              error={bookingError}
+              isSubmitting={isBooking}
               onCustomerChange={setCustomer}
               onChangeTime={handleChangeTime}
               onSubmit={handleSubmit}

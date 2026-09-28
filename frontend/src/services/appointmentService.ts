@@ -42,6 +42,31 @@ export class AppointmentApiError extends Error {
     }
 }
 
+/**
+ * Reads a JSON response body. Errors that do not come from the API, such as
+ * an HTML error page, have no JSON body and yield null instead of throwing.
+ */
+async function readJSON(response: Response): Promise<unknown> {
+    try {
+        return await response.json();
+    } catch {
+        return null;
+    }
+}
+
+function errorMessageFrom(data: unknown, fallback: string): string {
+    if (
+        typeof data === "object" &&
+        data !== null &&
+        "error" in data &&
+        typeof (data as ErrorResponse).error === "string"
+    ) {
+        return (data as ErrorResponse).error;
+    }
+
+    return fallback;
+}
+
 export async function getAvailableSlots(
     date: string,
 ): Promise<AvailabilityResponse> {
@@ -49,13 +74,13 @@ export async function getAvailableSlots(
         `/api/appointments/availability?date=${encodeURIComponent(date)}`,
     );
 
-    const data: AvailabilityResponse | ErrorResponse = await response.json();
+    const data = await readJSON(response);
 
-    if (!response.ok) {
-        const errorMessage =
-            "error" in data ? data.error : "Failed to fetch availability";
-
-        throw new AppointmentApiError(errorMessage, response.status);
+    if (!response.ok || data === null) {
+        throw new AppointmentApiError(
+            errorMessageFrom(data, "Failed to fetch availability"),
+            response.status,
+        );
     }
 
     return data as AvailabilityResponse;
@@ -72,13 +97,13 @@ export async function createAppointment(
         body: JSON.stringify(appointment),
     });
 
-    const data: Appointment | ErrorResponse = await response.json();
+    const data = await readJSON(response);
 
-    if (!response.ok) {
-        const errorMessage =
-            "error" in data ? data.error : "Failed to create appointment";
-
-        throw new AppointmentApiError(errorMessage, response.status);
+    if (!response.ok || data === null) {
+        throw new AppointmentApiError(
+            errorMessageFrom(data, "Failed to create appointment"),
+            response.status,
+        );
     }
 
     return data as Appointment;
