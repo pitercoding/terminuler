@@ -46,14 +46,12 @@ func (m *mockAppointmentRepository) Create(
 	return nil
 }
 
-// fixedClock returns a fixed "current time" (Friday, 2026-09-25 12:00 UTC),
-// so the tests do not depend on the real date.
+// fixedClock returns a fixed "current time" (Friday, 2026-09-25 12:00 UTC), so the tests do not depend on the real date.
 func fixedClock() time.Time {
 	return time.Date(2026, time.September, 25, 12, 0, 0, 0, time.UTC)
 }
 
-// assertErrorResponse checks that the response is a JSON error body in the
-// format {"error": expectedMessage}.
+// assertErrorResponse checks that the response is a JSON error body in the format {"error": expectedMessage}.
 func assertErrorResponse(
 	t *testing.T,
 	recorder *httptest.ResponseRecorder,
@@ -375,6 +373,222 @@ func TestCreateAppointment_BodyTooLarge(t *testing.T) {
 		request,
 	)
 
+	if recorder.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf(
+			"expected status %d, got %d",
+			http.StatusRequestEntityTooLarge,
+			recorder.Code,
+		)
+	}
+
+	assertErrorResponse(t, recorder, "request body too large")
+}
+
+func TestCreateAppointment_RejectsMalformedBodies(t *testing.T) {
+	validBody := `{
+		"appointment_date": "2026-09-28",
+		"start_time": "10:00",
+		"end_time": "11:00",
+		"customer_name": "Racha Cuca",
+		"customer_phone": "+5511999999999",
+		"customer_email": "rc@exemple.com"
+	}`
+
+	tests := []struct {
+		name string
+		body string
+	}{
+		{
+			name: "empty body",
+			body: "",
+		},
+		{
+			name: "unknown field",
+			body: `{
+				"appointment_date": "2026-09-28",
+				"start_time": "10:00",
+				"end_time": "11:00",
+				"customer_name": "Racha Cuca",
+				"customer_phone": "+5511999999999",
+				"customer_email": "rc@exemple.com",
+				"is_admin": true
+			}`,
+		},
+		{
+			name: "wrong field type",
+			body: `{"appointment_date": 20260928}`,
+		},
+		{
+			name: "two JSON objects",
+			body: validBody + `{}`,
+		},
+		{
+			name: "trailing garbage",
+			body: validBody + `garbage`,
+		},
+		{
+			name: "JSON array",
+			body: `[` + validBody + `]`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repository := &mockAppointmentRepository{
+				err: errors.New("repository should not be called"),
+			}
+
+			service := services.NewAppointmentService(repository, fixedClock)
+
+			handler := NewAppointmentHandler(service)
+
+			request := httptest.NewRequest(
+				http.MethodPost,
+				"/appointments",
+				strings.NewReader(tt.body),
+			)
+
+			recorder := httptest.NewRecorder()
+
+			handler.CreateAppointment(
+				recorder,
+				request,
+			)
+
+			if recorder.Code != http.StatusBadRequest {
+				t.Fatalf(
+					"expected status %d, got %d",
+					http.StatusBadRequest,
+					recorder.Code,
+				)
+			}
+
+			assertErrorResponse(t, recorder, "invalid request body")
+		})
+	}
+}
+
+func TestCreateAppointment_AllowsTrailingWhitespace(t *testing.T) {
+	repository := &mockAppointmentRepository{}
+
+	service := services.NewAppointmentService(repository, fixedClock)
+
+	handler := NewAppointmentHandler(service)
+
+	body := `{
+		"appointment_date": "2026-09-28",
+		"start_time": "10:00",
+		"end_time": "11:00",
+		"customer_name": "Racha Cuca",
+		"customer_phone": "+5511999999999",
+		"customer_email": "rc@exemple.com"
+	}` + "\n\n"
+
+	request := httptest.NewRequest(
+		http.MethodPost,
+		"/appointments",
+		strings.NewReader(body),
+	)
+
+	recorder := httptest.NewRecorder()
+
+	handler.CreateAppointment(
+		recorder,
+		request,
+	)
+
+	if recorder.Code != http.StatusCreated {
+		t.Fatalf(
+			"expected status %d, got %d: %s",
+			http.StatusCreated,
+			recorder.Code,
+			recorder.Body.String(),
+		)
+	}
+}
+
+func TestCreateAppointment_NormalizesTimesInResponse(t *testing.T) {
+	repository := &mockAppointmentRepository{}
+
+	service := services.NewAppointmentService(repository, fixedClock)
+
+	handler := NewAppointmentHandler(service)
+
+	body := `{
+		"appointment_date": "2026-09-28",
+		"start_time": "8:00",
+		"end_time": "9:00",
+		"customer_name": "Racha Cuca",
+		"customer_phone": "+5511999999999",
+		"customer_email": "rc@exemple.com"
+	}`
+
+	request := httptest.NewRequest(
+		http.MethodPost,
+		"/appointments",
+		strings.NewReader(body),
+	)
+
+	recorder := httptest.NewRecorder()
+
+	handler.CreateAppointment(
+		recorder,
+		request,
+	)
+
+	if recorder.Code != http.StatusCreated {
+		t.Fatalf(
+			"expected status %d, got %d",
+			http.StatusCreated,
+			recorder.Code,
+		)
+	}
+
+	var response map[string]any
+
+	if err := json.NewDecoder(recorder.Body).Decode(&response); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+
+	if response["start_time"] != "08:00" || response["end_time"] != "09:00" {
+		t.Fatalf(
+			"expected times 08:00-09:00, got %v-%v",
+			response["start_time"],
+			response["end_time"],
+		)
+	}
+}
+
+func TestCreateAppointment_BeyondBookingHorizon(t *testing.T) {
+	repository := &mockAppointmentRepository{}
+
+	service := services.NewAppointmentService(repository, fixedClock)
+
+	handler := NewAppointmentHandler(service)
+
+	// fixedClock is 2026-09-25, so the last bookable date is 2026-11-24.
+	body := `{
+		"appointment_date": "2026-11-25",
+		"start_time": "10:00",
+		"end_time": "11:00",
+		"customer_name": "Racha Cuca",
+		"customer_phone": "+5511999999999",
+		"customer_email": "rc@exemple.com"
+	}`
+
+	request := httptest.NewRequest(
+		http.MethodPost,
+		"/appointments",
+		strings.NewReader(body),
+	)
+
+	recorder := httptest.NewRecorder()
+
+	handler.CreateAppointment(
+		recorder,
+		request,
+	)
+
 	if recorder.Code != http.StatusBadRequest {
 		t.Fatalf(
 			"expected status %d, got %d",
@@ -383,7 +597,11 @@ func TestCreateAppointment_BodyTooLarge(t *testing.T) {
 		)
 	}
 
-	assertErrorResponse(t, recorder, "invalid request body")
+	assertErrorResponse(
+		t,
+		recorder,
+		"appointment date must be within the next 60 days",
+	)
 }
 
 func TestGetAvailability_Success(t *testing.T) {

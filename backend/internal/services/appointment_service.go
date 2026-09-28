@@ -59,6 +59,9 @@ const (
 	closingHour = 16
 )
 
+// maxBookingDays is how far ahead appointments can be booked, counting from today in the business timezone.
+const maxBookingDays = 60
+
 type AppointmentService struct {
 	repository AppointmentRepository
 	email      email.Sender
@@ -79,9 +82,7 @@ func NewAppointmentService(
 	)
 }
 
-// NewAppointmentServiceWithEmail is like NewAppointmentService but also sends
-// a confirmation email through emailSender after each successful booking.
-// A nil emailSender disables confirmation emails.
+// NewAppointmentServiceWithEmail is like NewAppointmentService but also sends a confirmation email through emailSender after each successful booking. A nil emailSender disables confirmation emails.
 func NewAppointmentServiceWithEmail(
 	repository AppointmentRepository,
 	emailSender email.Sender,
@@ -98,8 +99,7 @@ func NewAppointmentServiceWithEmail(
 	}
 }
 
-// slotStart combines a date and an hour into a point in time in the
-// business timezone.
+// slotStart combines a date and an hour into a point in time in the business timezone.
 func slotStart(date time.Time, hour int, location *time.Location) time.Time {
 	return time.Date(
 		date.Year(),
@@ -113,119 +113,141 @@ func slotStart(date time.Time, hour int, location *time.Location) time.Time {
 	)
 }
 
+// lastBookableDate returns the latest date that can be booked. The result is a calendar date at midnight UTC, like dates parsed from "2006-01-02", so both can be compared directly.
+func lastBookableDate(now time.Time) time.Time {
+	today := time.Date(
+		now.Year(),
+		now.Month(),
+		now.Day(),
+		0,
+		0,
+		0,
+		0,
+		time.UTC,
+	)
+
+	return today.AddDate(0, 0, maxBookingDays)
+}
+
 func (s *AppointmentService) ValidateCreateAppointment(
 	input CreateAppointmentInput,
 ) error {
+	_, err := s.newAppointment(input)
+	return err
+}
+
+// newAppointment validates input and returns the appointment to store, with customer fields trimmed and times normalized to HH:MM.
+func (s *AppointmentService) newAppointment(
+	input CreateAppointmentInput,
+) (*models.Appointment, error) {
 	customerName := strings.TrimSpace(input.CustomerName)
 	customerPhone := strings.TrimSpace(input.CustomerPhone)
 	customerEmail := strings.TrimSpace(input.CustomerEmail)
 
 	if customerName == "" {
-		return newValidationError("customer name is required")
+		return nil, newValidationError("customer name is required")
 	}
 
 	if utf8.RuneCountInString(customerName) > maxCustomerNameLength {
-		return newValidationError("customer name must have at most 255 characters")
+		return nil, newValidationError("customer name must have at most 255 characters")
 	}
 
 	if customerPhone == "" {
-		return newValidationError("customer phone is required")
+		return nil, newValidationError("customer phone is required")
 	}
 
 	if utf8.RuneCountInString(customerPhone) > maxCustomerPhoneLength {
-		return newValidationError("customer phone must have at most 50 characters")
+		return nil, newValidationError("customer phone must have at most 50 characters")
 	}
 
 	if customerEmail == "" {
-		return newValidationError("customer email is required")
+		return nil, newValidationError("customer email is required")
 	}
 
 	if utf8.RuneCountInString(customerEmail) > maxCustomerEmailLength {
-		return newValidationError("customer email must have at most 255 characters")
+		return nil, newValidationError("customer email must have at most 255 characters")
 	}
 
 	// mail.ParseAddress also accepts "Name <email>", so only a bare address is valid.
 	address, err := mail.ParseAddress(customerEmail)
 	if err != nil || address.Address != customerEmail {
-		return newValidationError("invalid customer email")
+		return nil, newValidationError("invalid customer email")
 	}
 
 	parsedDate, err := time.Parse("2006-01-02", input.AppointmentDate)
 	if err != nil {
-		return newValidationError("invalid appointment date")
+		return nil, newValidationError("invalid appointment date")
 	}
 
 	if parsedDate.Weekday() == time.Saturday ||
 		parsedDate.Weekday() == time.Sunday {
-		return newValidationError("appointments are not available on weekends")
+		return nil, newValidationError("appointments are not available on weekends")
 	}
 
 	startTime, err := time.Parse("15:04", input.StartTime)
 	if err != nil {
-		return newValidationError("invalid start time")
+		return nil, newValidationError("invalid start time")
 	}
 
 	endTime, err := time.Parse("15:04", input.EndTime)
 	if err != nil {
-		return newValidationError("invalid end time")
+		return nil, newValidationError("invalid end time")
 	}
 
 	if startTime.Minute() != 0 || endTime.Minute() != 0 {
-		return newValidationError("appointments must start and end on the hour")
+		return nil, newValidationError("appointments must start and end on the hour")
 	}
 
 	if startTime.Hour() < openingHour || startTime.Hour() >= closingHour {
-		return newValidationError("appointment start time must be between 08:00 and 15:00")
+		return nil, newValidationError("appointment start time must be between 08:00 and 15:00")
 	}
 
 	if endTime.Hour() < openingHour+1 || endTime.Hour() > closingHour {
-		return newValidationError("appointment end time must be between 09:00 and 16:00")
+		return nil, newValidationError("appointment end time must be between 09:00 and 16:00")
 	}
 
 	if endTime.Sub(startTime) != time.Hour {
-		return newValidationError("appointment must last exactly one hour")
+		return nil, newValidationError("appointment must last exactly one hour")
 	}
 
 	now := s.now()
 
 	if !slotStart(parsedDate, startTime.Hour(), now.Location()).After(now) {
-		return newValidationError("appointment must be scheduled in the future")
+		return nil, newValidationError("appointment must be scheduled in the future")
 	}
 
-	return nil
+	if parsedDate.After(lastBookableDate(now)) {
+		return nil, newValidationError(fmt.Sprintf(
+			"appointment date must be within the next %d days",
+			maxBookingDays,
+		))
+	}
+
+	// time.Parse accepts single-digit hours ("8:00"), so the stored and returned times are formatted again as HH:MM.
+	return &models.Appointment{
+		AppointmentDate: parsedDate,
+		StartTime:       startTime.Format("15:04"),
+		EndTime:         endTime.Format("15:04"),
+		CustomerName:    customerName,
+		CustomerPhone:   customerPhone,
+		CustomerEmail:   customerEmail,
+	}, nil
 }
 
 func (s *AppointmentService) Create(
 	ctx context.Context,
 	input CreateAppointmentInput,
 ) (*models.Appointment, error) {
-	if err := s.ValidateCreateAppointment(input); err != nil {
-		return nil, err
-	}
-
-	appointmentDate, err := time.Parse(
-		"2006-01-02",
-		input.AppointmentDate,
-	)
+	appointment, err := s.newAppointment(input)
 	if err != nil {
-		return nil, fmt.Errorf("failed to parse appointment date: %w", err)
-	}
-
-	appointment := &models.Appointment{
-		AppointmentDate: appointmentDate,
-		StartTime:       input.StartTime,
-		EndTime:         input.EndTime,
-		CustomerName:    strings.TrimSpace(input.CustomerName),
-		CustomerPhone:   strings.TrimSpace(input.CustomerPhone),
-		CustomerEmail:   strings.TrimSpace(input.CustomerEmail),
+		return nil, err
 	}
 
 	if err := s.repository.Create(ctx, appointment); err != nil {
 		return nil, fmt.Errorf("failed to create appointment: %w", err)
 	}
 
-	// The appointment is already stored, so an email failure is only logged:
-	// returning an error here would tell the client the booking failed.
+	// The appointment is already stored, so an email failure is only logged: returning an error here would tell the client the booking failed.
 	if s.email != nil {
 		if err := s.email.SendConfirmation(
 			appointment.CustomerEmail,
@@ -268,6 +290,10 @@ func (s *AppointmentService) GetAvailableSlots(
 	}
 
 	now := s.now()
+
+	if parsedDate.After(lastBookableDate(now)) {
+		return []AvailableSlot{}, nil
+	}
 
 	// The last slot of the day has already started: nothing left to book.
 	if !slotStart(parsedDate, closingHour-1, now.Location()).After(now) {

@@ -3,6 +3,7 @@ package handlers
 import (
 	"encoding/json"
 	"errors"
+	"io"
 	"log"
 	"net/http"
 	"time"
@@ -27,9 +28,7 @@ type createAppointmentRequest struct {
 	CustomerEmail   string `json:"customer_email"`
 }
 
-// appointmentResponse is the JSON shape returned to clients. The date is a
-// plain calendar date (YYYY-MM-DD) so browsers do not shift it to the
-// previous day when converting from UTC to the local timezone.
+// appointmentResponse is the JSON shape returned to clients. The date is a plain calendar date (YYYY-MM-DD) so browsers do not shift it to the previous day when converting from UTC to the local timezone.
 type appointmentResponse struct {
 	ID              int64     `json:"id"`
 	AppointmentDate string    `json:"appointment_date"`
@@ -64,8 +63,7 @@ func NewAppointmentHandler(
 	}
 }
 
-// writeServiceError maps service errors to HTTP responses without
-// leaking internal error details to the client.
+// writeServiceError maps service errors to HTTP responses without leaking internal error details to the client.
 func writeServiceError(
 	w http.ResponseWriter,
 	err error,
@@ -94,6 +92,29 @@ func writeServiceError(
 			"internal server error",
 		)
 	}
+}
+
+// writeDecodeError responds to a request body that could not be decoded. err may be nil when the body holds more than one JSON value.
+func writeDecodeError(
+	w http.ResponseWriter,
+	err error,
+) {
+	var maxBytesError *http.MaxBytesError
+
+	if errors.As(err, &maxBytesError) {
+		writeError(
+			w,
+			http.StatusRequestEntityTooLarge,
+			"request body too large",
+		)
+		return
+	}
+
+	writeError(
+		w,
+		http.StatusBadRequest,
+		"invalid request body",
+	)
 }
 
 func (h *AppointmentHandler) GetAvailability(
@@ -140,12 +161,17 @@ func (h *AppointmentHandler) CreateAppointment(
 
 	var request createAppointmentRequest
 
-	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
-		writeError(
-			w,
-			http.StatusBadRequest,
-			"invalid request body",
-		)
+	decoder := json.NewDecoder(r.Body)
+	decoder.DisallowUnknownFields()
+
+	if err := decoder.Decode(&request); err != nil {
+		writeDecodeError(w, err)
+		return
+	}
+
+	// The body must hold a single JSON object: anything after it, such as a second object, is rejected.
+	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
+		writeDecodeError(w, err)
 		return
 	}
 

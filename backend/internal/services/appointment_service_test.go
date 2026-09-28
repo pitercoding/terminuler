@@ -71,8 +71,7 @@ func (m *mockAppointmentRepository) Create(
 	return nil
 }
 
-// testNow is the fixed "current time" used by the tests (Friday,
-// 2026-09-25 12:00 UTC), so they do not depend on the real date.
+// testNow is the fixed "current time" used by the tests (Friday, 2026-09-25 12:00 UTC), so they do not depend on the real date.
 var testNow = time.Date(2026, time.September, 25, 12, 0, 0, 0, time.UTC)
 
 func fixedClock() time.Time {
@@ -177,6 +176,121 @@ func TestValidateCreateAppointment_UsesClockTimezone(t *testing.T) {
 		validInputFor("2026-09-24", "09:00", "10:00"),
 	); err == nil {
 		t.Fatal("expected 09:00 to be in the past")
+	}
+}
+
+func TestValidateCreateAppointment_BookingHorizon(t *testing.T) {
+	// testNow is Friday, 2026-09-25, so the last bookable date is Tuesday, 2026-11-24.
+	service := NewAppointmentService(nil, fixedClock)
+
+	tests := []struct {
+		name        string
+		date        string
+		expectError bool
+	}{
+		{
+			name:        "last bookable date",
+			date:        "2026-11-24",
+			expectError: false,
+		},
+		{
+			name:        "day after the last bookable date",
+			date:        "2026-11-25",
+			expectError: true,
+		},
+		{
+			name:        "far future",
+			date:        "2099-06-01",
+			expectError: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := service.ValidateCreateAppointment(
+				validInputFor(tt.date, "10:00", "11:00"),
+			)
+
+			if !tt.expectError {
+				if err != nil {
+					t.Fatalf("expected no error, got %v", err)
+				}
+
+				return
+			}
+
+			var validationError *ValidationError
+
+			if !errors.As(err, &validationError) {
+				t.Fatalf("expected a ValidationError, got %v", err)
+			}
+
+			expected := "appointment date must be within the next 60 days"
+
+			if validationError.Message != expected {
+				t.Fatalf("expected %q, got %q", expected, validationError.Message)
+			}
+		})
+	}
+}
+
+func TestValidateCreateAppointment_BookingHorizonUsesClockTimezone(t *testing.T) {
+	saoPaulo, err := time.LoadLocation("America/Sao_Paulo")
+	if err != nil {
+		t.Fatalf("failed to load timezone: %v", err)
+	}
+
+	// 01:00 UTC on 2026-09-25 is still 22:00 on 2026-09-24 in São Paulo, so
+	// the horizon counts from 2026-09-24 and ends on 2026-11-23.
+	now := time.Date(2026, time.September, 25, 1, 0, 0, 0, time.UTC).
+		In(saoPaulo)
+
+	service := NewAppointmentService(nil, clockAt(now))
+
+	if err := service.ValidateCreateAppointment(
+		validInputFor("2026-11-23", "10:00", "11:00"),
+	); err != nil {
+		t.Fatalf("expected 2026-11-23 to be bookable, got %v", err)
+	}
+
+	if err := service.ValidateCreateAppointment(
+		validInputFor("2026-11-24", "10:00", "11:00"),
+	); err == nil {
+		t.Fatal("expected 2026-11-24 to be beyond the booking horizon")
+	}
+}
+
+func TestGetAvailableSlots_BookingHorizon(t *testing.T) {
+	repository := &mockAppointmentRepository{}
+
+	service := NewAppointmentService(repository, fixedClock)
+
+	slots, err := service.GetAvailableSlots(
+		context.Background(),
+		"2026-11-24",
+	)
+
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+
+	if len(slots) != 8 {
+		t.Fatalf("expected 8 slots on the last bookable date, got %d", len(slots))
+	}
+
+	repository.err = errors.New("repository should not be called")
+
+	slots, err = service.GetAvailableSlots(
+		context.Background(),
+		"2026-11-25",
+	)
+
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+
+	if slots == nil || len(slots) != 0 {
+		t.Fatalf("expected empty non-nil slice beyond the horizon, got %v", slots)
 	}
 }
 
@@ -872,6 +986,42 @@ func TestCreateAppointment_Success(t *testing.T) {
 	if emailSender.endTime != "11:00" {
 		t.Errorf(
 			"expected email end time '11:00', got %q",
+			emailSender.endTime,
+		)
+	}
+}
+
+func TestCreateAppointment_NormalizesSingleDigitHours(t *testing.T) {
+	repository := &mockAppointmentRepository{}
+	emailSender := &mockEmailSender{}
+
+	service := NewAppointmentServiceWithEmail(
+		repository,
+		emailSender,
+		fixedClock,
+	)
+
+	appointment, err := service.Create(
+		context.Background(),
+		validInputFor("2026-09-28", "8:00", "9:00"),
+	)
+
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+
+	if appointment.StartTime != "08:00" || appointment.EndTime != "09:00" {
+		t.Errorf(
+			"expected stored times 08:00-09:00, got %s-%s",
+			appointment.StartTime,
+			appointment.EndTime,
+		)
+	}
+
+	if emailSender.startTime != "08:00" || emailSender.endTime != "09:00" {
+		t.Errorf(
+			"expected email times 08:00-09:00, got %s-%s",
+			emailSender.startTime,
 			emailSender.endTime,
 		)
 	}
