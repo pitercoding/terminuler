@@ -1,0 +1,166 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# A new push to the same branch or pull request cancels the run in progress.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  backend:
+    name: Backend (Go)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    services:
+      postgres:
+        image: postgres:18
+        # Disposable credentials, valid only inside this job's container.
+        env:
+          POSTGRES_USER: terminuler
+          POSTGRES_PASSWORD: terminuler
+          POSTGRES_DB: terminuler
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U terminuler -d terminuler"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    defaults:
+      run:
+        working-directory: backend
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+
+      - name: Check formatting
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "These files are not formatted with gofmt:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - name: Vet
+        run: |
+          go vet ./...
+          go vet -tags=integration ./...
+
+      - name: Unit tests
+        run: go test -race ./...
+
+      # Each run creates its own schema and drops it at the end.
+      - name: Integration tests
+        run: go test -race -tags=integration ./...
+        env:
+          TEST_DATABASE_URL: postgres://terminuler:terminuler@localhost:5432/terminuler?sslmode=disable
+
+  frontend:
+    name: Frontend (Next.js)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    defaults:
+      run:
+        working-directory: frontend
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      # next-env.d.ts and the route types are generated files, not committed.
+      - name: Type check
+        run: |
+          npx next typegen
+          npx tsc --noEmit
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Build
+        run: npm run build
+
+  e2e:
+    name: E2E (Playwright)
+    needs: [backend, frontend]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    services:
+      postgres:
+        image: postgres:18
+        # Disposable credentials, valid only inside this job's container.
+        env:
+          POSTGRES_USER: terminuler
+          POSTGRES_PASSWORD: terminuler
+          POSTGRES_DB: terminuler
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U terminuler -d terminuler"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    defaults:
+      run:
+        working-directory: frontend
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Playwright browser
+        run: npx playwright install --with-deps chromium
+
+      # Playwright starts the API (8081) and Next.js (3001) itself; e2edb
+      # creates and empties terminuler_test before the API starts.
+      - name: Run E2E tests
+        run: npm run test:e2e
+        env:
+          E2E_DATABASE_URL: postgres://terminuler:terminuler@localhost:5432/terminuler_test?sslmode=disable
+
+      - name: Upload traces and screenshots
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-test-results
+          path: frontend/test-results/
+          retention-days: 7
