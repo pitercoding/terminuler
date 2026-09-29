@@ -1,0 +1,9 @@
+# Secrets never go into the image; the host provides environment variables.
+.env
+.env.*
+
+# Not needed to build the binaries.
+Dockerfile
+.dockerignore
+*.test
+*.out
