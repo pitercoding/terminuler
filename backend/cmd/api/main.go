@@ -69,12 +69,10 @@ func run() error {
 		return err
 	}
 
-	resendAPIKey, err := config.ResendAPIKey()
+	emailSender, err := newEmailSender()
 	if err != nil {
 		return err
 	}
-
-	resendFromEmail := config.ResendFromEmail()
 
 	appointmentRateLimit, err := config.AppointmentRateLimit()
 	if err != nil {
@@ -89,11 +87,6 @@ func run() error {
 	mux := http.NewServeMux()
 
 	appointmentRepository := repositories.NewAppointmentRepository(db)
-
-	emailSender := email.NewResendSender(
-		resendAPIKey,
-		resendFromEmail,
-	)
 
 	appointmentService := services.NewAppointmentServiceWithEmail(
 		appointmentRepository,
@@ -180,4 +173,28 @@ func run() error {
 	log.Println("Server stopped")
 
 	return nil
+}
+
+// newEmailSender returns the sender selected by EMAIL_PROVIDER. The Resend API key is only required when emails are actually sent through Resend.
+func newEmailSender() (email.Sender, error) {
+	provider, err := config.EmailProvider()
+	if err != nil {
+		return nil, err
+	}
+
+	if provider == config.EmailProviderLog {
+		log.Println("EMAIL_PROVIDER=log: confirmation emails are logged, not sent")
+
+		return email.NewLogSender(nil), nil
+	}
+
+	resendAPIKey, err := config.ResendAPIKey()
+	if err != nil {
+		return nil, err
+	}
+
+	return email.NewResendSender(
+		resendAPIKey,
+		config.ResendFromEmail(),
+	), nil
 }

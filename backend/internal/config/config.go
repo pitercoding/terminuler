@@ -25,6 +25,16 @@ const (
 	defaultAppointmentRateLimit = 5
 )
 
+// Email providers accepted in EMAIL_PROVIDER.
+const (
+	// EmailProviderResend sends confirmation emails through Resend.
+	EmailProviderResend = "resend"
+
+	// EmailProviderLog only logs confirmation emails, for local testing
+	// (such as the E2E tests) without sending real emails.
+	EmailProviderLog = "log"
+)
+
 // envFiles are the locations checked for a .env file, relative to the
 // working directory: the current directory and the repository root when
 // running from backend/.
@@ -61,6 +71,27 @@ func DatabaseURL() (string, error) {
 	}
 
 	return databaseURL, nil
+}
+
+// EmailProvider returns how confirmation emails are delivered
+// (EMAIL_PROVIDER), defaulting to Resend so a deployment never skips real
+// emails unless it explicitly opts out.
+func EmailProvider() (string, error) {
+	provider := os.Getenv("EMAIL_PROVIDER")
+
+	switch provider {
+	case "":
+		return EmailProviderResend, nil
+	case EmailProviderResend, EmailProviderLog:
+		return provider, nil
+	default:
+		return "", fmt.Errorf(
+			"invalid EMAIL_PROVIDER %q: must be %q or %q",
+			provider,
+			EmailProviderResend,
+			EmailProviderLog,
+		)
+	}
 }
 
 // ResendAPIKey returns the API key used to send confirmation emails

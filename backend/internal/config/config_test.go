@@ -172,6 +172,40 @@ func TestLocation(t *testing.T) {
 	}
 }
 
+func TestEmailProvider(t *testing.T) {
+	t.Setenv("EMAIL_PROVIDER", "")
+
+	provider, err := EmailProvider()
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+
+	if provider != EmailProviderResend {
+		t.Fatalf("expected default provider %q, got %q", EmailProviderResend, provider)
+	}
+
+	for _, valid := range []string{EmailProviderResend, EmailProviderLog} {
+		t.Setenv("EMAIL_PROVIDER", valid)
+
+		provider, err := EmailProvider()
+		if err != nil {
+			t.Fatalf("expected no error for %q, got %v", valid, err)
+		}
+
+		if provider != valid {
+			t.Fatalf("expected provider %q, got %q", valid, provider)
+		}
+	}
+
+	for _, invalid := range []string{"smtp", "Resend", " log"} {
+		t.Setenv("EMAIL_PROVIDER", invalid)
+
+		if _, err := EmailProvider(); err == nil {
+			t.Fatalf("expected error for EMAIL_PROVIDER %q", invalid)
+		}
+	}
+}
+
 func TestResendAPIKey(t *testing.T) {
 	t.Setenv("RESEND_API_KEY", "")
 
