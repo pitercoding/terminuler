@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Geist } from "next/font/google";
 import "./globals.css";
+import { ClerkProvider } from "@clerk/nextjs";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -14,10 +15,12 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
-    <html lang="en" className={`${geistSans.variable} h-full antialiased`}>
-      <body className="flex min-h-full flex-col bg-slate-50 font-sans text-slate-900">
-        {children}
-      </body>
-    </html>
+    <ClerkProvider>
+      <html lang="en" className={`${geistSans.variable} h-full antialiased`}>
+        <body className="flex min-h-full flex-col bg-slate-50 font-sans text-slate-900">
+          {children}
+        </body>
+      </html>
+    </ClerkProvider>
   );
 }
