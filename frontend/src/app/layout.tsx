@@ -15,12 +15,12 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
-    <ClerkProvider>
-      <html lang="en" className={`${geistSans.variable} h-full antialiased`}>
-        <body className="flex min-h-full flex-col bg-slate-50 font-sans text-slate-900">
+    <html lang="en" className={`${geistSans.variable} h-full antialiased`}>
+      <body className="flex min-h-full flex-col bg-slate-50 font-sans text-slate-900">
+        <ClerkProvider>
           {children}
-        </body>
-      </html>
-    </ClerkProvider>
+        </ClerkProvider>
+      </body>
+    </html>
   );
 }
