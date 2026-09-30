@@ -214,3 +214,27 @@ func Location() (*time.Location, error) {
 
 	return location, nil
 }
+
+// ClerkSecretKey returns the Clerk secret key used to verify
+// authenticated requests.
+func ClerkSecretKey() (string, error) {
+	secretKey := os.Getenv("CLERK_SECRET_KEY")
+
+	if secretKey == "" {
+		return "", fmt.Errorf("CLERK_SECRET_KEY is not set")
+	}
+
+	return secretKey, nil
+}
+
+// AdminClerkUserID returns the Clerk user ID allowed to access
+// administrative endpoints.
+func AdminClerkUserID() (string, error) {
+	userID := os.Getenv("ADMIN_CLERK_USER_ID")
+
+	if userID == "" {
+		return "", fmt.Errorf("ADMIN_CLERK_USER_ID is not set")
+	}
+
+	return userID, nil
+}

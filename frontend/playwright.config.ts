@@ -74,6 +74,9 @@ export default defineConfig({
         EMAIL_PROVIDER: "log",
         // Every booking comes from the same machine; the limit has its own tests.
         APPOINTMENT_RATE_LIMIT: "1000",
+        // Required at startup; the E2E tests do not call the admin endpoints.
+        CLERK_SECRET_KEY: "sk_test_e2e",
+        ADMIN_CLERK_USER_ID: "user_e2e",
       },
       // Never reuse a running API: it could point to another database.
       reuseExistingServer: false,
@@ -86,6 +89,8 @@ export default defineConfig({
       // dev server is up; `next build` uses its own output directory.
       command: `npm run build && npm run start -- --port ${WEB_PORT}`,
       url: `http://localhost:${WEB_PORT}`,
+      // The Clerk keys come from process.env (CI) or frontend/.env.local,
+      // since Playwright passes process.env to every web server.
       env: {
         API_URL: `http://localhost:${API_PORT}`,
       },

@@ -11,6 +11,9 @@ import (
 	"syscall"
 	"time"
 
+	clerk "github.com/clerk/clerk-sdk-go/v2"
+
+	"github.com/pitercoding/terminuler/internal/auth"
 	"github.com/pitercoding/terminuler/internal/config"
 	"github.com/pitercoding/terminuler/internal/database"
 	"github.com/pitercoding/terminuler/internal/email"
@@ -50,6 +53,20 @@ func main() {
 // run starts the API and blocks until it stops. Returning instead of calling log.Fatal lets deferred cleanup, such as closing the database, run.
 func run() error {
 	if err := config.Load(); err != nil {
+		return err
+	}
+
+	clerkSecretKey, err := config.ClerkSecretKey()
+	if err != nil {
+		return err
+	}
+
+	// The Clerk middleware uses the secret key to fetch the JWKS that
+	// verifies session tokens.
+	clerk.SetKey(clerkSecretKey)
+
+	adminClerkUserID, err := config.AdminClerkUserID()
+	if err != nil {
 		return err
 	}
 
@@ -113,6 +130,7 @@ func run() error {
 		mux,
 		appointmentHandler,
 		createAppointmentLimit,
+		auth.AdminMiddleware(adminClerkUserID, handlers.WriteError),
 	)
 
 	port := config.Port()

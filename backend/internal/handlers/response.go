@@ -27,6 +27,16 @@ func writeJSON(
 	}
 }
 
+// WriteError exposes writeError to middlewares outside this package, such
+// as the admin authorization, so every error keeps the same JSON format.
+func WriteError(
+	w http.ResponseWriter,
+	status int,
+	message string,
+) {
+	writeError(w, status, message)
+}
+
 // writeError writes an error response in the format {"error": message}.
 func writeError(
 	w http.ResponseWriter,

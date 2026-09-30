@@ -47,6 +47,7 @@ func newTestMux(
 		mux,
 		handlers.NewAppointmentHandler(service),
 		createAppointmentLimit,
+		rejectNonAdmin,
 	)
 
 	return mux
@@ -54,6 +55,14 @@ func newTestMux(
 
 func noLimit(next http.Handler) http.Handler {
 	return next
+}
+
+// rejectNonAdmin stands in for the admin authorization rejecting the
+// request, so routes that skip it are caught.
+func rejectNonAdmin(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+	})
 }
 
 // rejectAll stands in for a rate limit that is already exceeded.
@@ -152,6 +161,12 @@ func TestRoutes(t *testing.T) {
 			path:           "/health",
 			expectedStatus: http.StatusMethodNotAllowed,
 			expectedAllow:  "GET, HEAD",
+		},
+		{
+			name:           "admin session requires admin",
+			method:         http.MethodGet,
+			path:           "/admin/session",
+			expectedStatus: http.StatusForbidden,
 		},
 		{
 			name:           "unknown route",
