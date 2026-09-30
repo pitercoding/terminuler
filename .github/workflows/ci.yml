@@ -103,6 +103,8 @@ jobs:
 
       - name: Build
         run: npm run build
+        env:
+          NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: ${{ secrets.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY }}
 
   e2e:
     name: E2E (Playwright)
@@ -156,6 +158,10 @@ jobs:
         run: npm run test:e2e
         env:
           E2E_DATABASE_URL: postgres://terminuler:terminuler@localhost:5432/terminuler_test?sslmode=disable
+          NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: ${{ secrets.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY }}
+          # Required by the Clerk middleware (src/proxy.ts), which runs on every
+          # page and API route of the Next.js server started by Playwright.
+          CLERK_SECRET_KEY: ${{ secrets.CLERK_SECRET_KEY }}
 
       - name: Upload traces and screenshots
         if: failure()
