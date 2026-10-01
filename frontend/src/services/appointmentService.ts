@@ -128,3 +128,26 @@ export async function getAdminAppointments(): Promise<Appointment[]> {
 
     return data as Appointment[];
 }
+
+/**
+ * Cancels the appointment with the given ID, freeing its slot. Only the admin
+ * can cancel: other users get a 401 or 403 AppointmentApiError, and an
+ * appointment that no longer exists gets a 404.
+ */
+export async function cancelAdminAppointment(id: number): Promise<void> {
+    const response = await fetch(`/api/admin/appointments/${id}`, {
+        method: "DELETE",
+    });
+
+    // 204 No Content: there is no body to read.
+    if (response.ok) {
+        return;
+    }
+
+    const data = await readJSON(response);
+
+    throw new AppointmentApiError(
+        errorMessageFrom(data, "Failed to cancel appointment"),
+        response.status,
+    );
+}
