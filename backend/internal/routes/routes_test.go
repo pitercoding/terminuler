@@ -424,3 +424,56 @@ func TestRoutes_DeleteAdminAppointment(t *testing.T) {
 		})
 	}
 }
+
+// unverifiableSessionToken is a well-formed JWT without the kid header, so
+// the Clerk middleware rejects it before fetching any key from Clerk, as it
+// does for a token issued by another Clerk instance.
+const unverifiableSessionToken = "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9." +
+	"eyJzdWIiOiJ1c2VyX2FkbWluIn0." +
+	"c2lnbmF0dXJl"
+
+// The Clerk middleware answers a rejected token with an empty body by
+// default. The Next.js proxy cannot parse it, so every admin route must
+// answer with the JSON error body instead.
+func TestRoutes_AdminRejectsUnverifiableTokenWithJSON(t *testing.T) {
+	mux := newTestMuxWithAdmin(
+		noLimit,
+		auth.AdminMiddleware(testAdminUserID, handlers.WriteError),
+	)
+
+	tests := []struct {
+		method string
+		path   string
+	}{
+		{http.MethodGet, "/admin/session"},
+		{http.MethodGet, "/admin/appointments"},
+		{http.MethodDelete, "/admin/appointments/1"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.method+" "+tt.path, func(t *testing.T) {
+			request := httptest.NewRequest(tt.method, tt.path, nil)
+			request.Header.Set("Authorization", "Bearer "+unverifiableSessionToken)
+
+			recorder := httptest.NewRecorder()
+
+			mux.ServeHTTP(recorder, request)
+
+			if recorder.Code != http.StatusUnauthorized {
+				t.Fatalf(
+					"expected status 401, got %d (%s)",
+					recorder.Code,
+					recorder.Body.String(),
+				)
+			}
+
+			if contentType := recorder.Header().Get("Content-Type"); contentType != "application/json" {
+				t.Errorf("expected Content-Type application/json, got %q", contentType)
+			}
+
+			if body := strings.TrimSpace(recorder.Body.String()); body != `{"error":"unauthorized"}` {
+				t.Errorf(`expected body {"error":"unauthorized"}, got %q`, body)
+			}
+		})
+	}
+}

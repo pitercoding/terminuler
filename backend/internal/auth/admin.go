@@ -15,7 +15,10 @@ func AdminMiddleware(
 	writeError ErrorWriter,
 ) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
-		return Middleware(RequireAdmin(adminUserID, writeError, next))
+		return Middleware(
+			writeError,
+			RequireAdmin(adminUserID, writeError, next),
+		)
 	}
 }
 

@@ -1,6 +1,8 @@
 import { auth } from "@clerk/nextjs/server";
 import { NextResponse } from "next/server";
 
+import { apiUnavailable, forwardJSON } from "@/lib/apiProxy";
+
 const API_URL = process.env.API_URL ?? "http://localhost:8080";
 
 /**
@@ -20,21 +22,16 @@ export async function GET() {
         );
     }
 
+    let response: Response;
+
     try {
-        const response = await fetch(`${API_URL}/admin/appointments`, {
+        response = await fetch(`${API_URL}/admin/appointments`, {
             headers: { Authorization: `Bearer ${token}` },
             cache: "no-store",
         });
-
-        const data = await response.json();
-
-        return NextResponse.json(data, {
-            status: response.status,
-        });
     } catch {
-        return NextResponse.json(
-            { error: "failed to connect to appointment API" },
-            { status: 502 },
-        );
+        return apiUnavailable();
     }
+
+    return forwardJSON(response);
 }

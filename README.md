@@ -141,7 +141,7 @@ flowchart LR
 ### Request flow
 
 1. The browser only talks to its own origin: `GET /api/appointments/availability` and `POST /api/appointments`.
-2. These **Next.js route handlers** ([`frontend/src/app/api`](frontend/src/app/api)) forward the request to the Go API at `API_URL`. They pass the API's status code, JSON body and `Retry-After` header back to the browser. If the API cannot be reached, they answer `502 {"error": "failed to connect to appointment API"}`.
+2. These **Next.js route handlers** ([`frontend/src/app/api`](frontend/src/app/api)) forward the request to the Go API at `API_URL`. They pass the API's status code, JSON body and `Retry-After` header back to the browser. An error without a JSON body keeps its status and gets `{"error": "appointment API responded with status …"}`. Only when the API cannot be reached do they answer `502 {"error": "failed to connect to appointment API"}`.
 3. The Go API is layered as **routes → handlers → services → repositories**:
    - handlers decode and encode HTTP and map errors to status codes
    - the service holds the business rules and triggers the email
@@ -723,8 +723,10 @@ Migrations run on every start because hosts without a pre-deploy step, such as R
 
 Set these in the providers' dashboards and never in the repository:
 
-- **Render (API):** `DATABASE_URL` (Render PostgreSQL connection string), `APP_TIMEZONE`, `EMAIL_PROVIDER=resend`, `RESEND_API_KEY`, `RESEND_FROM_EMAIL`, and optionally `APPOINTMENT_RATE_LIMIT` and `TRUSTED_PROXIES`. `PORT` is provided by Render.
-- **Vercel (frontend):** `API_URL=https://terminuler-api.onrender.com`.
+- **Render (API):** `DATABASE_URL` (Render PostgreSQL connection string), `APP_TIMEZONE`, `EMAIL_PROVIDER=resend`, `RESEND_API_KEY`, `RESEND_FROM_EMAIL`, `CLERK_SECRET_KEY`, `ADMIN_CLERK_USER_ID`, and optionally `APPOINTMENT_RATE_LIMIT` and `TRUSTED_PROXIES`. `PORT` is provided by Render.
+- **Vercel (frontend):** `API_URL=https://terminuler-api.onrender.com`, `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` and `CLERK_SECRET_KEY`.
+
+The API refuses to start without `CLERK_SECRET_KEY` or `ADMIN_CLERK_USER_ID`, and both Clerk secret keys must belong to the same Clerk instance as the publishable key: a token from another instance is rejected with `401`.
 
 ### Operational notes
 
