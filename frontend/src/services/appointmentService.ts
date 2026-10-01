@@ -108,3 +108,23 @@ export async function createAppointment(
 
     return data as Appointment;
 }
+/**
+ * Returns the upcoming appointments, from today onwards. Only the admin can
+ * list them: other users get a 401 or 403 AppointmentApiError.
+ */
+export async function getAdminAppointments(): Promise<Appointment[]> {
+    const response = await fetch("/api/admin/appointments", {
+        cache: "no-store",
+    });
+
+    const data = await readJSON(response);
+
+    if (!response.ok || !Array.isArray(data)) {
+        throw new AppointmentApiError(
+            errorMessageFrom(data, "Failed to fetch appointments"),
+            response.status,
+        );
+    }
+
+    return data as Appointment[];
+}
