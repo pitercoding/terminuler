@@ -2,7 +2,7 @@ package email
 
 import "log"
 
-// LogSender writes confirmation emails to a logger instead of sending them.
+// LogSender writes emails to a logger instead of sending them.
 // It is meant for local testing, such as the E2E tests, where no email must
 // leave the machine and no Resend API key is needed.
 type LogSender struct {
@@ -31,6 +31,26 @@ func (s *LogSender) SendConfirmation(
 ) error {
 	s.logger.Printf(
 		"confirmation email not sent (EMAIL_PROVIDER=log): to=%q name=%q date=%s time=%s-%s",
+		to,
+		customerName,
+		appointmentDate,
+		startTime,
+		endTime,
+	)
+
+	return nil
+}
+
+// SendCancellation logs the cancellation email and never fails.
+func (s *LogSender) SendCancellation(
+	to string,
+	customerName string,
+	appointmentDate string,
+	startTime string,
+	endTime string,
+) error {
+	s.logger.Printf(
+		"cancellation email not sent (EMAIL_PROVIDER=log): to=%q name=%q date=%s time=%s-%s",
 		to,
 		customerName,
 		appointmentDate,

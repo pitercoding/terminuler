@@ -20,6 +20,8 @@ type mockAppointmentRepository struct {
 	deletedID    int64
 }
 
+// mockEmailSender records the confirmation email in its flat fields and the
+// cancellation email in cancellation, which stays nil until one is sent.
 type mockEmailSender struct {
 	sendCalled      bool
 	to              string
@@ -28,6 +30,35 @@ type mockEmailSender struct {
 	startTime       string
 	endTime         string
 	err             error
+
+	cancellation    *sentEmail
+	cancellationErr error
+}
+
+type sentEmail struct {
+	to              string
+	customerName    string
+	appointmentDate string
+	startTime       string
+	endTime         string
+}
+
+func (m *mockEmailSender) SendCancellation(
+	to string,
+	customerName string,
+	appointmentDate string,
+	startTime string,
+	endTime string,
+) error {
+	m.cancellation = &sentEmail{
+		to:              to,
+		customerName:    customerName,
+		appointmentDate: appointmentDate,
+		startTime:       startTime,
+		endTime:         endTime,
+	}
+
+	return m.cancellationErr
 }
 
 func (m *mockEmailSender) SendConfirmation(
@@ -86,13 +117,25 @@ func (m *mockAppointmentRepository) Create(
 	return nil
 }
 
+// Delete returns the stored appointment with the given ID, or one with only
+// the ID set when the mock holds none.
 func (m *mockAppointmentRepository) Delete(
 	ctx context.Context,
 	id int64,
-) error {
+) (*models.Appointment, error) {
 	m.deletedID = id
 
-	return m.err
+	if m.err != nil {
+		return nil, m.err
+	}
+
+	for _, appointment := range m.appointments {
+		if appointment.ID == id {
+			return &appointment, nil
+		}
+	}
+
+	return &models.Appointment{ID: id}, nil
 }
 
 // testNow is the fixed "current time" used by the tests (Friday, 2026-09-25 12:00 UTC), so they do not depend on the real date.
@@ -1499,5 +1542,124 @@ func TestDeleteAppointment_RepositoryError(t *testing.T) {
 
 	if !errors.Is(err, repositoryErr) {
 		t.Fatalf("expected repository error to be wrapped, got %v", err)
+	}
+}
+
+func TestDeleteAppointment_SendsCancellationEmail(t *testing.T) {
+	repository := &mockAppointmentRepository{
+		appointments: []models.Appointment{
+			{
+				ID:              42,
+				AppointmentDate: time.Date(2026, time.October, 5, 0, 0, 0, 0, time.UTC),
+				StartTime:       "10:00:00",
+				EndTime:         "11:00:00",
+				CustomerName:    "Racha Cuca",
+				CustomerPhone:   "+5511999999999",
+				CustomerEmail:   "rc@exemple.com",
+			},
+		},
+	}
+	emailSender := &mockEmailSender{}
+
+	service := NewAppointmentServiceWithEmail(
+		repository,
+		emailSender,
+		fixedClock,
+	)
+
+	if err := service.DeleteAppointment(context.Background(), 42); err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+
+	if emailSender.cancellation == nil {
+		t.Fatal("expected cancellation email to be sent")
+	}
+
+	// PostgreSQL returns TIME values with seconds; the email gets HH:MM.
+	expected := sentEmail{
+		to:              "rc@exemple.com",
+		customerName:    "Racha Cuca",
+		appointmentDate: "2026-10-05",
+		startTime:       "10:00",
+		endTime:         "11:00",
+	}
+
+	if *emailSender.cancellation != expected {
+		t.Errorf(
+			"expected cancellation email %+v, got %+v",
+			expected,
+			*emailSender.cancellation,
+		)
+	}
+
+	if emailSender.sendCalled {
+		t.Error("expected no confirmation email on cancellation")
+	}
+}
+
+func TestDeleteAppointment_FailureDoesNotSendEmail(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+	}{
+		{
+			name: "appointment not found",
+			err:  repositories.ErrAppointmentNotFound,
+		},
+		{
+			name: "repository error",
+			err:  errors.New("database unavailable"),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			emailSender := &mockEmailSender{}
+
+			service := NewAppointmentServiceWithEmail(
+				&mockAppointmentRepository{err: tt.err},
+				emailSender,
+				fixedClock,
+			)
+
+			err := service.DeleteAppointment(context.Background(), 42)
+
+			if !errors.Is(err, tt.err) {
+				t.Fatalf("expected %v, got %v", tt.err, err)
+			}
+
+			if emailSender.cancellation != nil {
+				t.Fatal("expected no cancellation email when the deletion fails")
+			}
+		})
+	}
+}
+
+func TestDeleteAppointment_EmailErrorDoesNotFailCancellation(t *testing.T) {
+	repository := &mockAppointmentRepository{}
+
+	emailSender := &mockEmailSender{
+		cancellationErr: errors.New("email provider unavailable"),
+	}
+
+	service := NewAppointmentServiceWithEmail(
+		repository,
+		emailSender,
+		fixedClock,
+	)
+
+	if err := service.DeleteAppointment(context.Background(), 42); err != nil {
+		t.Fatalf(
+			"expected cancellation to succeed despite email error, got %v",
+			err,
+		)
+	}
+
+	if repository.deletedID != 42 {
+		t.Errorf("expected appointment 42 to be deleted, got %d", repository.deletedID)
+	}
+
+	if emailSender.cancellation == nil {
+		t.Fatal("expected cancellation email to be attempted")
 	}
 }

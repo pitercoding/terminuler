@@ -31,7 +31,7 @@ const (
 	// readTimeout limits reading the whole request, including the body.
 	readTimeout = 10 * time.Second
 
-	// writeTimeout must exceed the 10 second timeout of the confirmation email, which is sent before the booking response is written.
+	// writeTimeout must exceed the 10 second timeout of the confirmation and cancellation emails, which are sent before the response is written.
 	writeTimeout = 20 * time.Second
 
 	// idleTimeout limits how long keep-alive connections stay open between requests.
@@ -201,7 +201,7 @@ func newEmailSender() (email.Sender, error) {
 	}
 
 	if provider == config.EmailProviderLog {
-		log.Println("EMAIL_PROVIDER=log: confirmation emails are logged, not sent")
+		log.Println("EMAIL_PROVIDER=log: confirmation and cancellation emails are logged, not sent")
 
 		return email.NewLogSender(nil), nil
 	}

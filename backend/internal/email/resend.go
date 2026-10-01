@@ -75,3 +75,48 @@ func (s *ResendSender) SendConfirmation(
 
 	return nil
 }
+
+// SendCancellation sends the appointment cancellation email. Like
+// SendConfirmation, it HTML-escapes the customer name.
+func (s *ResendSender) SendCancellation(
+	to string,
+	customerName string,
+	appointmentDate string,
+	startTime string,
+	endTime string,
+) error {
+	safeCustomerName := html.EscapeString(customerName)
+
+	params := &resend.SendEmailRequest{
+		From:    s.from,
+		To:      []string{to},
+		Subject: "Appointment cancelled",
+		Html: fmt.Sprintf(
+			`
+			<h1>Your appointment has been cancelled</h1>
+			<p>Hello %s,</p>
+			<p>Your appointment has been cancelled.</p>
+
+			<p>
+				<strong>Date:</strong> %s<br>
+				<strong>Time:</strong> %s - %s
+			</p>
+
+			<p>The time slot is now available for a new booking.</p>
+
+			<p>If you would like to schedule another appointment, you can book one on our booking page.</p>
+			`,
+			safeCustomerName,
+			appointmentDate,
+			startTime,
+			endTime,
+		),
+	}
+
+	_, err := s.client.Emails.Send(params)
+	if err != nil {
+		return fmt.Errorf("failed to send cancellation email: %w", err)
+	}
+
+	return nil
+}
