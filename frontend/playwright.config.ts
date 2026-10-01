@@ -1,3 +1,5 @@
+import path from "node:path";
+
 import { defineConfig, devices } from "@playwright/test";
 
 /**
@@ -16,8 +18,11 @@ const WEB_PORT = 3001;
 
 // Reads the repository .env, like the Go API does, so E2E_DATABASE_URL or
 // DATABASE_URL can be defined there. Variables already set take precedence.
+// The path is relative to this file, not to the working directory, because
+// editors such as the VS Code Playwright extension load the config from the
+// workspace root.
 try {
-  process.loadEnvFile("../.env");
+  process.loadEnvFile(path.join(__dirname, "../.env"));
 } catch {
   // No .env file: the variables come from the environment (CI).
 }
