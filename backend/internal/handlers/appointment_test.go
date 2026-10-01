@@ -20,6 +20,8 @@ type mockAppointmentRepository struct {
 	appointments []models.Appointment
 	getByDateErr error
 	listErr      error
+	deleteErr    error
+	deletedID    int64
 	err          error
 }
 
@@ -56,6 +58,15 @@ func (m *mockAppointmentRepository) Create(
 	appointment.ID = 1
 
 	return nil
+}
+
+func (m *mockAppointmentRepository) Delete(
+	ctx context.Context,
+	id int64,
+) error {
+	m.deletedID = id
+
+	return m.deleteErr
 }
 
 // fixedClock returns a fixed "current time" (Friday, 2026-09-25 12:00 UTC), so the tests do not depend on the real date.

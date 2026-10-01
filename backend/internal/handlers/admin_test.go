@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/pitercoding/terminuler/internal/models"
+	"github.com/pitercoding/terminuler/internal/repositories"
 	"github.com/pitercoding/terminuler/internal/services"
 )
 
@@ -121,4 +122,111 @@ func TestListAppointments_RepositoryError(t *testing.T) {
 	}
 
 	assertErrorResponse(t, recorder, "internal server error")
+}
+
+// newDeleteRequest builds the request the mux would route to
+// DeleteAppointment, with id as the {id} path value.
+func newDeleteRequest(id string) *http.Request {
+	request := httptest.NewRequest(
+		http.MethodDelete,
+		"/admin/appointments/"+id,
+		nil,
+	)
+	request.SetPathValue("id", id)
+
+	return request
+}
+
+func TestDeleteAppointment_Success(t *testing.T) {
+	repository := &mockAppointmentRepository{}
+
+	handler := NewAppointmentHandler(
+		services.NewAppointmentService(repository, fixedClock),
+	)
+
+	recorder := httptest.NewRecorder()
+
+	handler.DeleteAppointment(recorder, newDeleteRequest("42"))
+
+	if recorder.Code != http.StatusNoContent {
+		t.Fatalf("expected status %d, got %d", http.StatusNoContent, recorder.Code)
+	}
+
+	if recorder.Body.Len() != 0 {
+		t.Errorf("expected an empty body, got %q", recorder.Body.String())
+	}
+
+	if repository.deletedID != 42 {
+		t.Errorf("expected appointment 42 to be deleted, got %d", repository.deletedID)
+	}
+}
+
+func TestDeleteAppointment_NotFound(t *testing.T) {
+	repository := &mockAppointmentRepository{
+		deleteErr: repositories.ErrAppointmentNotFound,
+	}
+
+	handler := NewAppointmentHandler(
+		services.NewAppointmentService(repository, fixedClock),
+	)
+
+	recorder := httptest.NewRecorder()
+
+	handler.DeleteAppointment(recorder, newDeleteRequest("999"))
+
+	if recorder.Code != http.StatusNotFound {
+		t.Fatalf("expected status %d, got %d", http.StatusNotFound, recorder.Code)
+	}
+
+	assertErrorResponse(t, recorder, "appointment not found")
+}
+
+func TestDeleteAppointment_RepositoryError(t *testing.T) {
+	repository := &mockAppointmentRepository{
+		deleteErr: errors.New("database connection failed"),
+	}
+
+	handler := NewAppointmentHandler(
+		services.NewAppointmentService(repository, fixedClock),
+	)
+
+	recorder := httptest.NewRecorder()
+
+	handler.DeleteAppointment(recorder, newDeleteRequest("42"))
+
+	if recorder.Code != http.StatusInternalServerError {
+		t.Fatalf(
+			"expected status %d, got %d",
+			http.StatusInternalServerError,
+			recorder.Code,
+		)
+	}
+
+	assertErrorResponse(t, recorder, "internal server error")
+}
+
+func TestDeleteAppointment_InvalidID(t *testing.T) {
+	for _, id := range []string{"abc", "0", "-1", "1.5", "99999999999999999999"} {
+		t.Run(id, func(t *testing.T) {
+			repository := &mockAppointmentRepository{}
+
+			handler := NewAppointmentHandler(
+				services.NewAppointmentService(repository, fixedClock),
+			)
+
+			recorder := httptest.NewRecorder()
+
+			handler.DeleteAppointment(recorder, newDeleteRequest(id))
+
+			if recorder.Code != http.StatusBadRequest {
+				t.Fatalf("expected status %d, got %d", http.StatusBadRequest, recorder.Code)
+			}
+
+			assertErrorResponse(t, recorder, "invalid appointment id")
+
+			if repository.deletedID != 0 {
+				t.Error("expected no appointment to be deleted")
+			}
+		})
+	}
 }

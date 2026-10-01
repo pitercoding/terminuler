@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"net/http"
+	"strconv"
 
 	"github.com/pitercoding/terminuler/internal/auth"
 )
@@ -44,4 +45,25 @@ func (h *AppointmentHandler) ListAppointments(
 	}
 
 	writeJSON(w, http.StatusOK, response)
+}
+
+// DeleteAppointment cancels the appointment whose ID is the {id} path
+// value, responding 204 No Content. It must be wrapped by the admin
+// authorization middleware.
+func (h *AppointmentHandler) DeleteAppointment(
+	w http.ResponseWriter,
+	r *http.Request,
+) {
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil || id <= 0 {
+		writeError(w, http.StatusBadRequest, "invalid appointment id")
+		return
+	}
+
+	if err := h.service.DeleteAppointment(r.Context(), id); err != nil {
+		writeServiceError(w, err)
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
 }

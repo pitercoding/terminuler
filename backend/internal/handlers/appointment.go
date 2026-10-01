@@ -83,6 +83,12 @@ func writeServiceError(
 			http.StatusConflict,
 			"appointment slot is already booked",
 		)
+	case errors.Is(err, repositories.ErrAppointmentNotFound):
+		writeError(
+			w,
+			http.StatusNotFound,
+			"appointment not found",
+		)
 	default:
 		log.Printf("internal server error: %v", err)
 

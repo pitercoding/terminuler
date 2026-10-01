@@ -17,6 +17,7 @@ type mockAppointmentRepository struct {
 	err          error
 	createCalled bool
 	fromDate     string
+	deletedID    int64
 }
 
 type mockEmailSender struct {
@@ -83,6 +84,15 @@ func (m *mockAppointmentRepository) Create(
 	appointment.ID = 1
 
 	return nil
+}
+
+func (m *mockAppointmentRepository) Delete(
+	ctx context.Context,
+	id int64,
+) error {
+	m.deletedID = id
+
+	return m.err
 }
 
 // testNow is the fixed "current time" used by the tests (Friday, 2026-09-25 12:00 UTC), so they do not depend on the real date.
@@ -1444,6 +1454,48 @@ func TestListAppointments_RepositoryError(t *testing.T) {
 	)
 
 	_, err := service.ListAppointments(context.Background())
+
+	if !errors.Is(err, repositoryErr) {
+		t.Fatalf("expected repository error to be wrapped, got %v", err)
+	}
+}
+
+func TestDeleteAppointment_DeletesGivenID(t *testing.T) {
+	repository := &mockAppointmentRepository{}
+
+	service := NewAppointmentService(repository, fixedClock)
+
+	if err := service.DeleteAppointment(context.Background(), 42); err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+
+	if repository.deletedID != 42 {
+		t.Errorf("expected appointment 42 to be deleted, got %d", repository.deletedID)
+	}
+}
+
+func TestDeleteAppointment_NotFound(t *testing.T) {
+	service := NewAppointmentService(
+		&mockAppointmentRepository{err: repositories.ErrAppointmentNotFound},
+		fixedClock,
+	)
+
+	err := service.DeleteAppointment(context.Background(), 999)
+
+	if !errors.Is(err, repositories.ErrAppointmentNotFound) {
+		t.Fatalf("expected ErrAppointmentNotFound, got %v", err)
+	}
+}
+
+func TestDeleteAppointment_RepositoryError(t *testing.T) {
+	repositoryErr := errors.New("database unavailable")
+
+	service := NewAppointmentService(
+		&mockAppointmentRepository{err: repositoryErr},
+		fixedClock,
+	)
+
+	err := service.DeleteAppointment(context.Background(), 42)
 
 	if !errors.Is(err, repositoryErr) {
 		t.Fatalf("expected repository error to be wrapped, got %v", err)

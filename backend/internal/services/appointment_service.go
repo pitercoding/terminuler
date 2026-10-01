@@ -17,6 +17,7 @@ type AppointmentRepository interface {
 	GetByDate(ctx context.Context, date string) ([]models.Appointment, error)
 	GetAppointments(ctx context.Context, fromDate string) ([]models.Appointment, error)
 	Create(ctx context.Context, appointment *models.Appointment) error
+	Delete(ctx context.Context, id int64) error
 }
 
 type AvailableSlot struct {
@@ -362,4 +363,18 @@ func (s *AppointmentService) ListAppointments(
 	}
 
 	return result, nil
+}
+
+// DeleteAppointment cancels the appointment with the given ID. Its slot
+// becomes available again because availability is computed from the stored
+// appointments. A missing appointment wraps repositories.ErrAppointmentNotFound.
+func (s *AppointmentService) DeleteAppointment(
+	ctx context.Context,
+	id int64,
+) error {
+	if err := s.repository.Delete(ctx, id); err != nil {
+		return fmt.Errorf("failed to delete appointment: %w", err)
+	}
+
+	return nil
 }

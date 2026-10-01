@@ -48,6 +48,13 @@ func (s *stubAppointmentRepository) Create(
 	return nil
 }
 
+func (s *stubAppointmentRepository) Delete(
+	ctx context.Context,
+	id int64,
+) error {
+	return nil
+}
+
 func newTestMux(
 	createAppointmentLimit func(http.Handler) http.Handler,
 ) *http.ServeMux {
@@ -206,6 +213,26 @@ func TestRoutes(t *testing.T) {
 			expectedAllow:  "GET, HEAD",
 		},
 		{
+			name:           "delete appointment requires admin",
+			method:         http.MethodDelete,
+			path:           "/admin/appointments/1",
+			expectedStatus: http.StatusForbidden,
+		},
+		{
+			name:           "delete appointment with wrong method",
+			method:         http.MethodGet,
+			path:           "/admin/appointments/1",
+			expectedStatus: http.StatusMethodNotAllowed,
+			expectedAllow:  "DELETE",
+		},
+		{
+			name:           "delete appointments collection is not allowed",
+			method:         http.MethodDelete,
+			path:           "/admin/appointments",
+			expectedStatus: http.StatusMethodNotAllowed,
+			expectedAllow:  "GET, HEAD",
+		},
+		{
 			name:           "unknown route",
 			method:         http.MethodGet,
 			path:           "/unknown",
@@ -342,6 +369,57 @@ func TestRoutes_AdminAppointments(t *testing.T) {
 					!strings.Contains(body, `"start_time":"10:00"`) {
 					t.Errorf("expected the stored appointment, got %s", body)
 				}
+			}
+		})
+	}
+}
+
+func TestRoutes_DeleteAdminAppointment(t *testing.T) {
+	tests := []struct {
+		name           string
+		requireAdmin   func(http.Handler) http.Handler
+		expectedStatus int
+	}{
+		{
+			name:           "missing session token",
+			requireAdmin:   auth.AdminMiddleware(testAdminUserID, handlers.WriteError),
+			expectedStatus: http.StatusUnauthorized,
+		},
+		{
+			name:           "unauthenticated",
+			requireAdmin:   withSessionUser(""),
+			expectedStatus: http.StatusUnauthorized,
+		},
+		{
+			name:           "authenticated non-admin",
+			requireAdmin:   withSessionUser("user_other"),
+			expectedStatus: http.StatusForbidden,
+		},
+		{
+			name:           "admin",
+			requireAdmin:   withSessionUser(testAdminUserID),
+			expectedStatus: http.StatusNoContent,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mux := newTestMuxWithAdmin(noLimit, tt.requireAdmin)
+
+			recorder := httptest.NewRecorder()
+
+			mux.ServeHTTP(
+				recorder,
+				httptest.NewRequest(http.MethodDelete, "/admin/appointments/1", nil),
+			)
+
+			if recorder.Code != tt.expectedStatus {
+				t.Fatalf(
+					"expected status %d, got %d (%s)",
+					tt.expectedStatus,
+					recorder.Code,
+					recorder.Body.String(),
+				)
 			}
 		})
 	}

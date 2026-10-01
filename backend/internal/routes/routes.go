@@ -13,7 +13,8 @@ import (
 // createAppointmentLimit wraps only POST /appointments, the one route that
 // writes data and sends an email; reads are left unlimited.
 //
-// requireAdmin wraps every /admin route, so only the admin can reach them.
+// requireAdmin wraps every /admin route, reads and deletes alike, so only
+// the admin can reach them.
 func RegisterRoutes(
 	mux *http.ServeMux,
 	appointmentHandler *handlers.AppointmentHandler,
@@ -45,6 +46,13 @@ func RegisterRoutes(
 		"GET /admin/appointments",
 		requireAdmin(
 			http.HandlerFunc(appointmentHandler.ListAppointments),
+		),
+	)
+
+	mux.Handle(
+		"DELETE /admin/appointments/{id}",
+		requireAdmin(
+			http.HandlerFunc(appointmentHandler.DeleteAppointment),
 		),
 	)
 }

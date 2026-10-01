@@ -12,6 +12,8 @@ import (
 
 var ErrAppointmentConflict = errors.New("appointment slot is already booked")
 
+var ErrAppointmentNotFound = errors.New("appointment not found")
+
 type AppointmentRepository struct {
 	db *sql.DB
 }
@@ -152,6 +154,33 @@ func (r *AppointmentRepository) Create(
 		}
 
 		return fmt.Errorf("failed to create appointment: %w", err)
+	}
+
+	return nil
+}
+
+// Delete removes the appointment with the given ID, freeing its slot. It returns ErrAppointmentNotFound when no appointment has that ID.
+func (r *AppointmentRepository) Delete(
+	ctx context.Context,
+	id int64,
+) error {
+	query := `
+		DELETE FROM appointments
+		WHERE id = $1
+	`
+
+	result, err := r.db.ExecContext(ctx, query, id)
+	if err != nil {
+		return fmt.Errorf("failed to delete appointment: %w", err)
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("failed to check deleted appointment: %w", err)
+	}
+
+	if rowsAffected == 0 {
+		return ErrAppointmentNotFound
 	}
 
 	return nil
