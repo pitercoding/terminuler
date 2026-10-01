@@ -159,29 +159,49 @@ func (r *AppointmentRepository) Create(
 	return nil
 }
 
-// Delete removes the appointment with the given ID, freeing its slot. It returns ErrAppointmentNotFound when no appointment has that ID.
+// Delete removes the appointment with the given ID, freeing its slot, and
+// returns it as it was stored. Reading and deleting in a single statement
+// means the returned data belongs to the row this call removed, even when
+// the same appointment is cancelled twice concurrently. It returns
+// ErrAppointmentNotFound when no appointment has that ID.
 func (r *AppointmentRepository) Delete(
 	ctx context.Context,
 	id int64,
-) error {
+) (*models.Appointment, error) {
 	query := `
 		DELETE FROM appointments
 		WHERE id = $1
+		RETURNING
+			id,
+			appointment_date,
+			start_time,
+			end_time,
+			customer_name,
+			customer_phone,
+			customer_email,
+			created_at
 	`
 
-	result, err := r.db.ExecContext(ctx, query, id)
+	var appointment models.Appointment
+
+	err := r.db.QueryRowContext(ctx, query, id).Scan(
+		&appointment.ID,
+		&appointment.AppointmentDate,
+		&appointment.StartTime,
+		&appointment.EndTime,
+		&appointment.CustomerName,
+		&appointment.CustomerPhone,
+		&appointment.CustomerEmail,
+		&appointment.CreatedAt,
+	)
+
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrAppointmentNotFound
+	}
+
 	if err != nil {
-		return fmt.Errorf("failed to delete appointment: %w", err)
+		return nil, fmt.Errorf("failed to delete appointment: %w", err)
 	}
 
-	rowsAffected, err := result.RowsAffected()
-	if err != nil {
-		return fmt.Errorf("failed to check deleted appointment: %w", err)
-	}
-
-	if rowsAffected == 0 {
-		return ErrAppointmentNotFound
-	}
-
-	return nil
+	return &appointment, nil
 }

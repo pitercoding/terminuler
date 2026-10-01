@@ -17,7 +17,7 @@ type AppointmentRepository interface {
 	GetByDate(ctx context.Context, date string) ([]models.Appointment, error)
 	GetAppointments(ctx context.Context, fromDate string) ([]models.Appointment, error)
 	Create(ctx context.Context, appointment *models.Appointment) error
-	Delete(ctx context.Context, id int64) error
+	Delete(ctx context.Context, id int64) (*models.Appointment, error)
 }
 
 type AvailableSlot struct {
@@ -84,7 +84,7 @@ func NewAppointmentService(
 	)
 }
 
-// NewAppointmentServiceWithEmail is like NewAppointmentService but also sends a confirmation email through emailSender after each successful booking. A nil emailSender disables confirmation emails.
+// NewAppointmentServiceWithEmail is like NewAppointmentService but also emails the customer through emailSender after each successful booking or cancellation. A nil emailSender disables these emails.
 func NewAppointmentServiceWithEmail(
 	repository AppointmentRepository,
 	emailSender email.Sender,
@@ -365,15 +365,34 @@ func (s *AppointmentService) ListAppointments(
 	return result, nil
 }
 
-// DeleteAppointment cancels the appointment with the given ID. Its slot
-// becomes available again because availability is computed from the stored
-// appointments. A missing appointment wraps repositories.ErrAppointmentNotFound.
+// DeleteAppointment cancels the appointment with the given ID and emails
+// the customer. Its slot becomes available again because availability is
+// computed from the stored appointments. A missing appointment wraps
+// repositories.ErrAppointmentNotFound.
 func (s *AppointmentService) DeleteAppointment(
 	ctx context.Context,
 	id int64,
 ) error {
-	if err := s.repository.Delete(ctx, id); err != nil {
+	appointment, err := s.repository.Delete(ctx, id)
+	if err != nil {
 		return fmt.Errorf("failed to delete appointment: %w", err)
+	}
+
+	// The appointment is already deleted, so an email failure is only logged: returning an error here would tell the admin the cancellation failed.
+	if s.email != nil {
+		if err := s.email.SendCancellation(
+			appointment.CustomerEmail,
+			appointment.CustomerName,
+			appointment.AppointmentDate.Format("2006-01-02"),
+			normalizeTime(appointment.StartTime),
+			normalizeTime(appointment.EndTime),
+		); err != nil {
+			log.Printf(
+				"failed to send cancellation email for appointment %d: %v",
+				appointment.ID,
+				err,
+			)
+		}
 	}
 
 	return nil

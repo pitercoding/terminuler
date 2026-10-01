@@ -51,8 +51,8 @@ func (s *stubAppointmentRepository) Create(
 func (s *stubAppointmentRepository) Delete(
 	ctx context.Context,
 	id int64,
-) error {
-	return nil
+) (*models.Appointment, error) {
+	return &models.Appointment{ID: id}, nil
 }
 
 func newTestMux(

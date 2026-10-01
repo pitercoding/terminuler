@@ -361,7 +361,7 @@ func TestDelete_RemovesOnlyThatAppointment(t *testing.T) {
 		}
 	}
 
-	if err := repository.Delete(ctx, deleted.ID); err != nil {
+	if _, err := repository.Delete(ctx, deleted.ID); err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
 
@@ -385,7 +385,7 @@ func TestDelete_FreesSlotForRebooking(t *testing.T) {
 		t.Fatalf("failed to create appointment: %v", err)
 	}
 
-	if err := repository.Delete(ctx, appointment.ID); err != nil {
+	if _, err := repository.Delete(ctx, appointment.ID); err != nil {
 		t.Fatalf("failed to delete appointment: %v", err)
 	}
 
@@ -400,10 +400,48 @@ func TestDelete_FreesSlotForRebooking(t *testing.T) {
 func TestDelete_NonexistentReturnsNotFound(t *testing.T) {
 	repository := newTestRepository(t)
 
-	err := repository.Delete(context.Background(), 999)
+	deleted, err := repository.Delete(context.Background(), 999)
 
 	if !errors.Is(err, ErrAppointmentNotFound) {
 		t.Fatalf("expected ErrAppointmentNotFound, got %v", err)
+	}
+
+	if deleted != nil {
+		t.Fatalf("expected no appointment, got %+v", deleted)
+	}
+}
+
+func TestDelete_ReturnsDeletedAppointment(t *testing.T) {
+	repository := newTestRepository(t)
+	ctx := context.Background()
+
+	appointment := newAppointment("2026-09-28", "10:00", "11:00")
+
+	if err := repository.Create(ctx, appointment); err != nil {
+		t.Fatalf("failed to create appointment: %v", err)
+	}
+
+	deleted, err := repository.Delete(ctx, appointment.ID)
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+
+	if deleted.ID != appointment.ID ||
+		deleted.AppointmentDate.Format("2006-01-02") != "2026-09-28" ||
+		deleted.CustomerName != appointment.CustomerName ||
+		deleted.CustomerPhone != appointment.CustomerPhone ||
+		deleted.CustomerEmail != appointment.CustomerEmail ||
+		!deleted.CreatedAt.Equal(appointment.CreatedAt) {
+		t.Fatalf("expected the deleted appointment %+v, got %+v", appointment, deleted)
+	}
+
+	// PostgreSQL returns TIME values with seconds.
+	if deleted.StartTime != "10:00:00" || deleted.EndTime != "11:00:00" {
+		t.Errorf(
+			"expected times 10:00:00-11:00:00, got %s-%s",
+			deleted.StartTime,
+			deleted.EndTime,
+		)
 	}
 }
 
@@ -417,11 +455,11 @@ func TestDelete_TwiceReturnsNotFound(t *testing.T) {
 		t.Fatalf("failed to create appointment: %v", err)
 	}
 
-	if err := repository.Delete(ctx, appointment.ID); err != nil {
+	if _, err := repository.Delete(ctx, appointment.ID); err != nil {
 		t.Fatalf("failed to delete appointment: %v", err)
 	}
 
-	if err := repository.Delete(ctx, appointment.ID); !errors.Is(
+	if _, err := repository.Delete(ctx, appointment.ID); !errors.Is(
 		err,
 		ErrAppointmentNotFound,
 	) {
