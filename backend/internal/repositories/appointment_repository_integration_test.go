@@ -265,6 +265,68 @@ func TestGetByDate_NoAppointments(t *testing.T) {
 	}
 }
 
+func TestGetAppointments_FiltersFromDateAndOrdersChronologically(t *testing.T) {
+	repository := newTestRepository(t)
+	ctx := context.Background()
+
+	for _, appointment := range []*models.Appointment{
+		newAppointment("2026-09-29", "09:00", "10:00"),
+		newAppointment("2026-09-25", "08:00", "09:00"),
+		newAppointment("2026-09-28", "14:00", "15:00"),
+		newAppointment("2026-09-28", "08:00", "09:00"),
+		newAppointment("2026-09-24", "10:00", "11:00"),
+	} {
+		if err := repository.Create(ctx, appointment); err != nil {
+			t.Fatalf("failed to create appointment: %v", err)
+		}
+	}
+
+	appointments, err := repository.GetAppointments(ctx, "2026-09-25")
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+
+	expected := []string{
+		"2026-09-25 08:00:00",
+		"2026-09-28 08:00:00",
+		"2026-09-28 14:00:00",
+		"2026-09-29 09:00:00",
+	}
+
+	if len(appointments) != len(expected) {
+		t.Fatalf(
+			"expected %d appointments, got %d",
+			len(expected),
+			len(appointments),
+		)
+	}
+
+	for i, appointment := range appointments {
+		got := appointment.AppointmentDate.Format("2006-01-02") +
+			" " + appointment.StartTime
+
+		if got != expected[i] {
+			t.Errorf("expected appointment %d at %s, got %s", i, expected[i], got)
+		}
+	}
+}
+
+func TestGetAppointments_NoAppointments(t *testing.T) {
+	repository := newTestRepository(t)
+
+	appointments, err := repository.GetAppointments(
+		context.Background(),
+		"2026-09-25",
+	)
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+
+	if len(appointments) != 0 {
+		t.Fatalf("expected 0 appointments, got %d", len(appointments))
+	}
+}
+
 func TestCreate_DuplicateSlotReturnsConflict(t *testing.T) {
 	repository := newTestRepository(t)
 	ctx := context.Background()

@@ -8,6 +8,9 @@ import (
 	"testing"
 	"time"
 
+	clerk "github.com/clerk/clerk-sdk-go/v2"
+
+	"github.com/pitercoding/terminuler/internal/auth"
 	"github.com/pitercoding/terminuler/internal/handlers"
 	"github.com/pitercoding/terminuler/internal/models"
 	"github.com/pitercoding/terminuler/internal/services"
@@ -22,6 +25,20 @@ func (s *stubAppointmentRepository) GetByDate(
 	return nil, nil
 }
 
+func (s *stubAppointmentRepository) GetAppointments(
+	ctx context.Context,
+	fromDate string,
+) ([]models.Appointment, error) {
+	return []models.Appointment{
+		{
+			ID:              1,
+			AppointmentDate: time.Date(2026, time.September, 28, 0, 0, 0, 0, time.UTC),
+			StartTime:       "10:00:00",
+			EndTime:         "11:00:00",
+		},
+	}, nil
+}
+
 func (s *stubAppointmentRepository) Create(
 	ctx context.Context,
 	appointment *models.Appointment,
@@ -33,6 +50,13 @@ func (s *stubAppointmentRepository) Create(
 
 func newTestMux(
 	createAppointmentLimit func(http.Handler) http.Handler,
+) *http.ServeMux {
+	return newTestMuxWithAdmin(createAppointmentLimit, rejectNonAdmin)
+}
+
+func newTestMuxWithAdmin(
+	createAppointmentLimit func(http.Handler) http.Handler,
+	requireAdmin func(http.Handler) http.Handler,
 ) *http.ServeMux {
 	service := services.NewAppointmentService(
 		&stubAppointmentRepository{},
@@ -47,7 +71,7 @@ func newTestMux(
 		mux,
 		handlers.NewAppointmentHandler(service),
 		createAppointmentLimit,
-		rejectNonAdmin,
+		requireAdmin,
 	)
 
 	return mux
@@ -169,6 +193,19 @@ func TestRoutes(t *testing.T) {
 			expectedStatus: http.StatusForbidden,
 		},
 		{
+			name:           "admin appointments requires admin",
+			method:         http.MethodGet,
+			path:           "/admin/appointments",
+			expectedStatus: http.StatusForbidden,
+		},
+		{
+			name:           "admin appointments with wrong method",
+			method:         http.MethodPost,
+			path:           "/admin/appointments",
+			expectedStatus: http.StatusMethodNotAllowed,
+			expectedAllow:  "GET, HEAD",
+		},
+		{
 			name:           "unknown route",
 			method:         http.MethodGet,
 			path:           "/unknown",
@@ -213,6 +250,98 @@ func TestRoutes(t *testing.T) {
 					tt.expectedAllow,
 					recorder.Header().Get("Allow"),
 				)
+			}
+		})
+	}
+}
+
+const testAdminUserID = "user_admin"
+
+// withSessionUser stands in for the Clerk middleware having verified a
+// session token for userID, so the real admin check runs without calling
+// Clerk. An empty userID leaves the request unauthenticated.
+func withSessionUser(userID string) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		requireAdmin := auth.RequireAdmin(
+			testAdminUserID,
+			handlers.WriteError,
+			next,
+		)
+
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if userID != "" {
+				r = r.WithContext(clerk.ContextWithSessionClaims(
+					r.Context(),
+					&clerk.SessionClaims{
+						RegisteredClaims: clerk.RegisteredClaims{
+							Subject: userID,
+						},
+					},
+				))
+			}
+
+			requireAdmin.ServeHTTP(w, r)
+		})
+	}
+}
+
+func TestRoutes_AdminAppointments(t *testing.T) {
+	tests := []struct {
+		name           string
+		requireAdmin   func(http.Handler) http.Handler
+		expectedStatus int
+	}{
+		{
+			// The real middleware: without an Authorization header Clerk
+			// verifies nothing, so no network call is made.
+			name:           "missing session token",
+			requireAdmin:   auth.AdminMiddleware(testAdminUserID, handlers.WriteError),
+			expectedStatus: http.StatusUnauthorized,
+		},
+		{
+			name:           "unauthenticated",
+			requireAdmin:   withSessionUser(""),
+			expectedStatus: http.StatusUnauthorized,
+		},
+		{
+			name:           "authenticated non-admin",
+			requireAdmin:   withSessionUser("user_other"),
+			expectedStatus: http.StatusForbidden,
+		},
+		{
+			name:           "admin",
+			requireAdmin:   withSessionUser(testAdminUserID),
+			expectedStatus: http.StatusOK,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mux := newTestMuxWithAdmin(noLimit, tt.requireAdmin)
+
+			recorder := httptest.NewRecorder()
+
+			mux.ServeHTTP(
+				recorder,
+				httptest.NewRequest(http.MethodGet, "/admin/appointments", nil),
+			)
+
+			if recorder.Code != tt.expectedStatus {
+				t.Fatalf(
+					"expected status %d, got %d (%s)",
+					tt.expectedStatus,
+					recorder.Code,
+					recorder.Body.String(),
+				)
+			}
+
+			if tt.expectedStatus == http.StatusOK {
+				body := recorder.Body.String()
+
+				if !strings.Contains(body, `"appointment_date":"2026-09-28"`) ||
+					!strings.Contains(body, `"start_time":"10:00"`) {
+					t.Errorf("expected the stored appointment, got %s", body)
+				}
 			}
 		})
 	}

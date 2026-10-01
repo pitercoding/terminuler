@@ -16,6 +16,7 @@ type mockAppointmentRepository struct {
 	appointments []models.Appointment
 	err          error
 	createCalled bool
+	fromDate     string
 }
 
 type mockEmailSender struct {
@@ -49,6 +50,19 @@ func (m *mockAppointmentRepository) GetByDate(
 	ctx context.Context,
 	date string,
 ) ([]models.Appointment, error) {
+	if m.err != nil {
+		return nil, m.err
+	}
+
+	return m.appointments, nil
+}
+
+func (m *mockAppointmentRepository) GetAppointments(
+	ctx context.Context,
+	fromDate string,
+) ([]models.Appointment, error) {
+	m.fromDate = fromDate
+
 	if m.err != nil {
 		return nil, m.err
 	}
@@ -1326,5 +1340,112 @@ func TestCreateAppointment_DatabaseErrorDoesNotSendEmail(t *testing.T) {
 
 	if emailSender.sendCalled {
 		t.Fatal("expected email not to be sent when appointment creation fails")
+	}
+}
+
+func TestListAppointments_ReturnsAppointmentsFromToday(t *testing.T) {
+	repository := &mockAppointmentRepository{
+		appointments: []models.Appointment{
+			{
+				ID:              1,
+				AppointmentDate: time.Date(2026, time.September, 25, 0, 0, 0, 0, time.UTC),
+				StartTime:       "08:00:00",
+				EndTime:         "09:00:00",
+				CustomerName:    "Racha Cuca",
+			},
+			{
+				ID:              2,
+				AppointmentDate: time.Date(2026, time.September, 28, 0, 0, 0, 0, time.UTC),
+				StartTime:       "14:00:00",
+				EndTime:         "15:00:00",
+				CustomerName:    "Jane Doe",
+			},
+		},
+	}
+
+	service := NewAppointmentService(repository, fixedClock)
+
+	appointments, err := service.ListAppointments(context.Background())
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+
+	if repository.fromDate != "2026-09-25" {
+		t.Errorf("expected appointments from 2026-09-25, got %q", repository.fromDate)
+	}
+
+	if len(appointments) != 2 {
+		t.Fatalf("expected 2 appointments, got %d", len(appointments))
+	}
+
+	// PostgreSQL returns TIME values with seconds; the service trims them.
+	expectedTimes := [][2]string{{"08:00", "09:00"}, {"14:00", "15:00"}}
+
+	for i, appointment := range appointments {
+		if appointment.ID != repository.appointments[i].ID {
+			t.Errorf("expected appointment %d to keep its order", i)
+		}
+
+		if appointment.StartTime != expectedTimes[i][0] ||
+			appointment.EndTime != expectedTimes[i][1] {
+			t.Errorf(
+				"expected appointment %d at %s-%s, got %s-%s",
+				i,
+				expectedTimes[i][0],
+				expectedTimes[i][1],
+				appointment.StartTime,
+				appointment.EndTime,
+			)
+		}
+	}
+}
+
+func TestListAppointments_UsesClockTimezone(t *testing.T) {
+	// 2026-09-25 23:30 UTC is already 2026-09-26 in Berlin.
+	berlin, err := time.LoadLocation("Europe/Berlin")
+	if err != nil {
+		t.Fatalf("failed to load location: %v", err)
+	}
+
+	now := time.Date(2026, time.September, 25, 23, 30, 0, 0, time.UTC).In(berlin)
+
+	repository := &mockAppointmentRepository{}
+
+	service := NewAppointmentService(repository, clockAt(now))
+
+	if _, err := service.ListAppointments(context.Background()); err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+
+	if repository.fromDate != "2026-09-26" {
+		t.Errorf("expected appointments from 2026-09-26, got %q", repository.fromDate)
+	}
+}
+
+func TestListAppointments_EmptyIsNotNil(t *testing.T) {
+	service := NewAppointmentService(&mockAppointmentRepository{}, fixedClock)
+
+	appointments, err := service.ListAppointments(context.Background())
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+
+	if appointments == nil {
+		t.Fatal("expected an empty slice, got nil")
+	}
+}
+
+func TestListAppointments_RepositoryError(t *testing.T) {
+	repositoryErr := errors.New("database unavailable")
+
+	service := NewAppointmentService(
+		&mockAppointmentRepository{err: repositoryErr},
+		fixedClock,
+	)
+
+	_, err := service.ListAppointments(context.Background())
+
+	if !errors.Is(err, repositoryErr) {
+		t.Fatalf("expected repository error to be wrapped, got %v", err)
 	}
 }

@@ -45,6 +45,42 @@ func (r *AppointmentRepository) GetByDate(
 	if err != nil {
 		return nil, fmt.Errorf("failed to get appointments by date: %w", err)
 	}
+
+	return scanAppointments(rows)
+}
+
+// GetAppointments returns the appointments on or after fromDate
+// (YYYY-MM-DD), in chronological order.
+func (r *AppointmentRepository) GetAppointments(
+	ctx context.Context,
+	fromDate string,
+) ([]models.Appointment, error) {
+	query := `
+		SELECT
+			id,
+			appointment_date,
+			start_time,
+			end_time,
+			customer_name,
+			customer_phone,
+			customer_email,
+			created_at
+		FROM appointments
+		WHERE appointment_date >= $1
+		ORDER BY appointment_date, start_time
+	`
+
+	rows, err := r.db.QueryContext(ctx, query, fromDate)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get appointments: %w", err)
+	}
+
+	return scanAppointments(rows)
+}
+
+// scanAppointments reads every row selected by the appointment queries and
+// closes rows.
+func scanAppointments(rows *sql.Rows) ([]models.Appointment, error) {
 	defer rows.Close()
 
 	var appointments []models.Appointment

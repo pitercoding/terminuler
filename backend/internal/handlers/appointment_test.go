@@ -19,6 +19,7 @@ import (
 type mockAppointmentRepository struct {
 	appointments []models.Appointment
 	getByDateErr error
+	listErr      error
 	err          error
 }
 
@@ -28,6 +29,17 @@ func (m *mockAppointmentRepository) GetByDate(
 ) ([]models.Appointment, error) {
 	if m.getByDateErr != nil {
 		return nil, m.getByDateErr
+	}
+
+	return m.appointments, nil
+}
+
+func (m *mockAppointmentRepository) GetAppointments(
+	ctx context.Context,
+	fromDate string,
+) ([]models.Appointment, error) {
+	if m.listErr != nil {
+		return nil, m.listErr
 	}
 
 	return m.appointments, nil

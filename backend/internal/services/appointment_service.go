@@ -15,6 +15,7 @@ import (
 
 type AppointmentRepository interface {
 	GetByDate(ctx context.Context, date string) ([]models.Appointment, error)
+	GetAppointments(ctx context.Context, fromDate string) ([]models.Appointment, error)
 	Create(ctx context.Context, appointment *models.Appointment) error
 }
 
@@ -334,4 +335,31 @@ func (s *AppointmentService) GetAvailableSlots(
 	}
 
 	return availableSlots, nil
+}
+
+// ListAppointments returns the appointments from today onwards, in the
+// business timezone, ordered by date and start time. Today's appointments
+// are all included, even those that already started, so the admin sees
+// the whole day. Times are returned as HH:MM.
+func (s *AppointmentService) ListAppointments(
+	ctx context.Context,
+) ([]models.Appointment, error) {
+	today := s.now().Format("2006-01-02")
+
+	appointments, err := s.repository.GetAppointments(ctx, today)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list appointments: %w", err)
+	}
+
+	// Non-nil so an empty list is encoded as [] instead of null.
+	result := make([]models.Appointment, 0, len(appointments))
+
+	for _, appointment := range appointments {
+		appointment.StartTime = normalizeTime(appointment.StartTime)
+		appointment.EndTime = normalizeTime(appointment.EndTime)
+
+		result = append(result, appointment)
+	}
+
+	return result, nil
 }
