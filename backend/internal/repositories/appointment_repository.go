@@ -37,7 +37,9 @@ func (r *AppointmentRepository) GetByDate(
 			customer_name,
 			customer_phone,
 			customer_email,
-			created_at
+			status,
+			created_at,
+			cancelled_at
 		FROM appointments
 		WHERE appointment_date = $1
 		ORDER BY start_time
@@ -66,7 +68,9 @@ func (r *AppointmentRepository) GetAppointments(
 			customer_name,
 			customer_phone,
 			customer_email,
-			created_at
+			status,
+			created_at,
+			cancelled_at
 		FROM appointments
 		WHERE appointment_date >= $1
 		ORDER BY appointment_date, start_time
@@ -98,7 +102,9 @@ func scanAppointments(rows *sql.Rows) ([]models.Appointment, error) {
 			&appointment.CustomerName,
 			&appointment.CustomerPhone,
 			&appointment.CustomerEmail,
+			&appointment.Status,
 			&appointment.CreatedAt,
+			&appointment.CancelledAt,
 		); err != nil {
 			return nil, fmt.Errorf("failed to scan appointment: %w", err)
 		}
@@ -129,6 +135,7 @@ func (r *AppointmentRepository) Create(
 		VALUES ($1, $2, $3, $4, $5, $6)
 		RETURNING
 			id,
+			status,
 			created_at
 	`
 
@@ -143,6 +150,7 @@ func (r *AppointmentRepository) Create(
 		appointment.CustomerEmail,
 	).Scan(
 		&appointment.ID,
+		&appointment.Status,
 		&appointment.CreatedAt,
 	)
 

@@ -20,6 +20,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgconn"
+
 	"github.com/pitercoding/terminuler/internal/database"
 	"github.com/pitercoding/terminuler/internal/models"
 	"github.com/pitercoding/terminuler/internal/services"
@@ -152,6 +154,10 @@ func TestCreate_SetsGeneratedFields(t *testing.T) {
 	if appointment.CreatedAt.Before(before) {
 		t.Errorf("expected CreatedAt to be recent, got %v", appointment.CreatedAt)
 	}
+
+	if appointment.Status != models.AppointmentStatusConfirmed {
+		t.Errorf("expected status %q, got %q", models.AppointmentStatusConfirmed, appointment.Status)
+	}
 }
 
 func TestGetByDate_ReturnsStoredAppointment(t *testing.T) {
@@ -204,6 +210,14 @@ func TestGetByDate_ReturnsStoredAppointment(t *testing.T) {
 			created.CreatedAt,
 			stored.CreatedAt,
 		)
+	}
+
+	if stored.Status != models.AppointmentStatusConfirmed {
+		t.Errorf("expected status %q, got %q", models.AppointmentStatusConfirmed, stored.Status)
+	}
+
+	if stored.CancelledAt != nil {
+		t.Errorf("expected no CancelledAt, got %v", stored.CancelledAt)
 	}
 }
 
@@ -464,6 +478,124 @@ func TestDelete_TwiceReturnsNotFound(t *testing.T) {
 		ErrAppointmentNotFound,
 	) {
 		t.Fatalf("expected ErrAppointmentNotFound, got %v", err)
+	}
+}
+
+// markCancelled cancels the appointment directly in the table, as the
+// repository has no cancel operation yet.
+func markCancelled(t *testing.T, id int64) {
+	t.Helper()
+
+	if _, err := testDB.Exec(
+		"UPDATE appointments SET status = 'cancelled', cancelled_at = NOW() WHERE id = $1",
+		id,
+	); err != nil {
+		t.Fatalf("failed to cancel appointment %d: %v", id, err)
+	}
+}
+
+func TestGetAppointments_ReadsCancelledStatus(t *testing.T) {
+	repository := newTestRepository(t)
+	ctx := context.Background()
+
+	appointment := newAppointment("2026-09-28", "10:00", "11:00")
+
+	if err := repository.Create(ctx, appointment); err != nil {
+		t.Fatalf("failed to create appointment: %v", err)
+	}
+
+	markCancelled(t, appointment.ID)
+
+	appointments, err := repository.GetAppointments(ctx, "2026-09-28")
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+
+	if len(appointments) != 1 {
+		t.Fatalf("expected 1 appointment, got %d", len(appointments))
+	}
+
+	if appointments[0].Status != models.AppointmentStatusCancelled {
+		t.Errorf(
+			"expected status %q, got %q",
+			models.AppointmentStatusCancelled,
+			appointments[0].Status,
+		)
+	}
+
+	if appointments[0].CancelledAt == nil {
+		t.Error("expected CancelledAt to be set")
+	}
+}
+
+func TestCreate_CancelledAppointmentDoesNotHoldSlot(t *testing.T) {
+	repository := newTestRepository(t)
+	ctx := context.Background()
+
+	cancelled := newAppointment("2026-09-28", "10:00", "11:00")
+
+	if err := repository.Create(ctx, cancelled); err != nil {
+		t.Fatalf("failed to create appointment: %v", err)
+	}
+
+	markCancelled(t, cancelled.ID)
+
+	if err := repository.Create(
+		ctx,
+		newAppointment("2026-09-28", "10:00", "11:00"),
+	); err != nil {
+		t.Fatalf("expected the cancelled slot to be bookable, got %v", err)
+	}
+
+	// The new booking is confirmed, so it holds the slot again.
+	err := repository.Create(
+		ctx,
+		newAppointment("2026-09-28", "10:00", "11:00"),
+	)
+
+	if !errors.Is(err, ErrAppointmentConflict) {
+		t.Fatalf("expected ErrAppointmentConflict, got %v", err)
+	}
+}
+
+func TestAppointmentsTable_RejectsInconsistentStatus(t *testing.T) {
+	tests := []struct {
+		name   string
+		update string
+	}{
+		{
+			name:   "unknown status",
+			update: "UPDATE appointments SET status = 'pending' WHERE id = $1",
+		},
+		{
+			name:   "cancelled without cancelled_at",
+			update: "UPDATE appointments SET status = 'cancelled' WHERE id = $1",
+		},
+		{
+			name:   "confirmed with cancelled_at",
+			update: "UPDATE appointments SET cancelled_at = NOW() WHERE id = $1",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repository := newTestRepository(t)
+
+			appointment := newAppointment("2026-09-28", "10:00", "11:00")
+
+			if err := repository.Create(context.Background(), appointment); err != nil {
+				t.Fatalf("failed to create appointment: %v", err)
+			}
+
+			_, err := testDB.Exec(tt.update, appointment.ID)
+
+			var pgError *pgconn.PgError
+
+			// 23514 is check_violation.
+			if !errors.As(err, &pgError) || pgError.Code != "23514" {
+				t.Fatalf("expected a check violation, got %v", err)
+			}
+		})
 	}
 }
 
