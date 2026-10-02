@@ -76,6 +76,76 @@ func TestListAppointments_Success(t *testing.T) {
 	}
 }
 
+// The admin history includes cancelled appointments, so the response must
+// tell them apart from confirmed ones.
+func TestListAppointments_IncludesStatus(t *testing.T) {
+	cancelledAt := time.Date(2026, time.September, 25, 14, 30, 0, 0, time.UTC)
+
+	repository := &mockAppointmentRepository{
+		appointments: []models.Appointment{
+			{
+				ID:              1,
+				AppointmentDate: time.Date(2026, time.October, 7, 0, 0, 0, 0, time.UTC),
+				StartTime:       "08:00:00",
+				EndTime:         "09:00:00",
+				Status:          models.AppointmentStatusConfirmed,
+			},
+			{
+				ID:              2,
+				AppointmentDate: time.Date(2026, time.October, 7, 0, 0, 0, 0, time.UTC),
+				StartTime:       "09:00:00",
+				EndTime:         "10:00:00",
+				Status:          models.AppointmentStatusCancelled,
+				CancelledAt:     &cancelledAt,
+			},
+		},
+	}
+
+	handler := NewAppointmentHandler(
+		services.NewAppointmentService(repository, fixedClock),
+	)
+
+	recorder := httptest.NewRecorder()
+
+	handler.ListAppointments(
+		recorder,
+		httptest.NewRequest(http.MethodGet, "/admin/appointments", nil),
+	)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, recorder.Code)
+	}
+
+	var response []map[string]any
+
+	if err := json.NewDecoder(recorder.Body).Decode(&response); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+
+	if len(response) != 2 {
+		t.Fatalf("expected 2 appointments, got %d", len(response))
+	}
+
+	expected := []map[string]any{
+		{"status": "confirmed", "cancelled_at": nil},
+		{"status": "cancelled", "cancelled_at": "2026-09-25T14:30:00Z"},
+	}
+
+	for i, fields := range expected {
+		for key, value := range fields {
+			got, ok := response[i][key]
+			if !ok {
+				t.Errorf("appointment %d: expected field %s in response", i, key)
+				continue
+			}
+
+			if got != value {
+				t.Errorf("appointment %d: expected %s %v, got %v", i, key, value, got)
+			}
+		}
+	}
+}
+
 func TestListAppointments_EmptyReturnsEmptyList(t *testing.T) {
 	handler := NewAppointmentHandler(
 		services.NewAppointmentService(&mockAppointmentRepository{}, fixedClock),

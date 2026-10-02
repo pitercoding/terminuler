@@ -30,14 +30,17 @@ type createAppointmentRequest struct {
 
 // appointmentResponse is the JSON shape returned to clients. The date is a plain calendar date (YYYY-MM-DD) so browsers do not shift it to the previous day when converting from UTC to the local timezone.
 type appointmentResponse struct {
-	ID              int64     `json:"id"`
-	AppointmentDate string    `json:"appointment_date"`
-	StartTime       string    `json:"start_time"`
-	EndTime         string    `json:"end_time"`
-	CustomerName    string    `json:"customer_name"`
-	CustomerPhone   string    `json:"customer_phone"`
-	CustomerEmail   string    `json:"customer_email"`
-	CreatedAt       time.Time `json:"created_at"`
+	ID              int64                    `json:"id"`
+	AppointmentDate string                   `json:"appointment_date"`
+	StartTime       string                   `json:"start_time"`
+	EndTime         string                   `json:"end_time"`
+	CustomerName    string                   `json:"customer_name"`
+	CustomerPhone   string                   `json:"customer_phone"`
+	CustomerEmail   string                   `json:"customer_email"`
+	Status          models.AppointmentStatus `json:"status"`
+	CreatedAt       time.Time                `json:"created_at"`
+	// CancelledAt is null unless Status is cancelled.
+	CancelledAt *time.Time `json:"cancelled_at"`
 }
 
 func newAppointmentResponse(
@@ -51,7 +54,9 @@ func newAppointmentResponse(
 		CustomerName:    appointment.CustomerName,
 		CustomerPhone:   appointment.CustomerPhone,
 		CustomerEmail:   appointment.CustomerEmail,
+		Status:          appointment.Status,
 		CreatedAt:       appointment.CreatedAt,
+		CancelledAt:     appointment.CancelledAt,
 	}
 }
 
