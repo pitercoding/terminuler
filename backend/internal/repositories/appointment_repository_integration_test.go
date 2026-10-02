@@ -481,20 +481,7 @@ func TestDelete_TwiceReturnsNotFound(t *testing.T) {
 	}
 }
 
-// markCancelled cancels the appointment directly in the table, as the
-// repository has no cancel operation yet.
-func markCancelled(t *testing.T, id int64) {
-	t.Helper()
-
-	if _, err := testDB.Exec(
-		"UPDATE appointments SET status = 'cancelled', cancelled_at = NOW() WHERE id = $1",
-		id,
-	); err != nil {
-		t.Fatalf("failed to cancel appointment %d: %v", id, err)
-	}
-}
-
-func TestGetAppointments_ReadsCancelledStatus(t *testing.T) {
+func TestCancel_ReturnsCancelledAppointment(t *testing.T) {
 	repository := newTestRepository(t)
 	ctx := context.Background()
 
@@ -504,31 +491,184 @@ func TestGetAppointments_ReadsCancelledStatus(t *testing.T) {
 		t.Fatalf("failed to create appointment: %v", err)
 	}
 
-	markCancelled(t, appointment.ID)
+	before := time.Now().Add(-time.Minute)
+
+	cancelled, err := repository.Cancel(ctx, appointment.ID)
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+
+	if cancelled.ID != appointment.ID ||
+		cancelled.AppointmentDate.Format("2006-01-02") != "2026-09-28" ||
+		cancelled.CustomerName != appointment.CustomerName ||
+		cancelled.CustomerPhone != appointment.CustomerPhone ||
+		cancelled.CustomerEmail != appointment.CustomerEmail ||
+		!cancelled.CreatedAt.Equal(appointment.CreatedAt) {
+		t.Fatalf("expected the cancelled appointment %+v, got %+v", appointment, cancelled)
+	}
+
+	// PostgreSQL returns TIME values with seconds.
+	if cancelled.StartTime != "10:00:00" || cancelled.EndTime != "11:00:00" {
+		t.Errorf(
+			"expected times 10:00:00-11:00:00, got %s-%s",
+			cancelled.StartTime,
+			cancelled.EndTime,
+		)
+	}
+
+	if cancelled.Status != models.AppointmentStatusCancelled {
+		t.Errorf("expected status %q, got %q", models.AppointmentStatusCancelled, cancelled.Status)
+	}
+
+	if cancelled.CancelledAt == nil || cancelled.CancelledAt.Before(before) {
+		t.Errorf("expected CancelledAt to be recent, got %v", cancelled.CancelledAt)
+	}
+}
+
+func TestCancel_KeepsAppointmentStored(t *testing.T) {
+	repository := newTestRepository(t)
+	ctx := context.Background()
+
+	appointment := newAppointment("2026-09-28", "10:00", "11:00")
+
+	if err := repository.Create(ctx, appointment); err != nil {
+		t.Fatalf("failed to create appointment: %v", err)
+	}
+
+	cancelled, err := repository.Cancel(ctx, appointment.ID)
+	if err != nil {
+		t.Fatalf("failed to cancel appointment: %v", err)
+	}
 
 	appointments, err := repository.GetAppointments(ctx, "2026-09-28")
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
 
-	if len(appointments) != 1 {
-		t.Fatalf("expected 1 appointment, got %d", len(appointments))
+	if len(appointments) != 1 || appointments[0].ID != appointment.ID {
+		t.Fatalf("expected appointment %d to remain stored, got %+v", appointment.ID, appointments)
 	}
 
-	if appointments[0].Status != models.AppointmentStatusCancelled {
-		t.Errorf(
-			"expected status %q, got %q",
-			models.AppointmentStatusCancelled,
-			appointments[0].Status,
-		)
+	stored := appointments[0]
+
+	if stored.Status != models.AppointmentStatusCancelled {
+		t.Errorf("expected status %q, got %q", models.AppointmentStatusCancelled, stored.Status)
 	}
 
-	if appointments[0].CancelledAt == nil {
-		t.Error("expected CancelledAt to be set")
+	if stored.CancelledAt == nil || !stored.CancelledAt.Equal(*cancelled.CancelledAt) {
+		t.Errorf("expected CancelledAt %v, got %v", cancelled.CancelledAt, stored.CancelledAt)
 	}
 }
 
-func TestCreate_CancelledAppointmentDoesNotHoldSlot(t *testing.T) {
+func TestCancel_TwiceReturnsNotFound(t *testing.T) {
+	repository := newTestRepository(t)
+	ctx := context.Background()
+
+	appointment := newAppointment("2026-09-28", "10:00", "11:00")
+
+	if err := repository.Create(ctx, appointment); err != nil {
+		t.Fatalf("failed to create appointment: %v", err)
+	}
+
+	first, err := repository.Cancel(ctx, appointment.ID)
+	if err != nil {
+		t.Fatalf("failed to cancel appointment: %v", err)
+	}
+
+	second, err := repository.Cancel(ctx, appointment.ID)
+
+	if !errors.Is(err, ErrAppointmentNotFound) {
+		t.Fatalf("expected ErrAppointmentNotFound, got %v", err)
+	}
+
+	if second != nil {
+		t.Fatalf("expected no appointment, got %+v", second)
+	}
+
+	// The failed attempt must not move the original cancellation time.
+	appointments, err := repository.GetAppointments(ctx, "2026-09-28")
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+
+	if len(appointments) != 1 ||
+		appointments[0].CancelledAt == nil ||
+		!appointments[0].CancelledAt.Equal(*first.CancelledAt) {
+		t.Fatalf("expected CancelledAt %v to be kept, got %+v", first.CancelledAt, appointments)
+	}
+}
+
+func TestCancel_NonexistentReturnsNotFound(t *testing.T) {
+	repository := newTestRepository(t)
+
+	cancelled, err := repository.Cancel(context.Background(), 999)
+
+	if !errors.Is(err, ErrAppointmentNotFound) {
+		t.Fatalf("expected ErrAppointmentNotFound, got %v", err)
+	}
+
+	if cancelled != nil {
+		t.Fatalf("expected no appointment, got %+v", cancelled)
+	}
+}
+
+func TestCancel_AffectsOnlyThatAppointment(t *testing.T) {
+	repository := newTestRepository(t)
+	ctx := context.Background()
+
+	before := newAppointment("2026-09-28", "09:00", "10:00")
+	cancelled := newAppointment("2026-09-28", "10:00", "11:00")
+	after := newAppointment("2026-09-28", "11:00", "12:00")
+
+	for _, appointment := range []*models.Appointment{before, cancelled, after} {
+		if err := repository.Create(ctx, appointment); err != nil {
+			t.Fatalf("failed to create appointment: %v", err)
+		}
+	}
+
+	if _, err := repository.Cancel(ctx, cancelled.ID); err != nil {
+		t.Fatalf("failed to cancel appointment: %v", err)
+	}
+
+	appointments, err := repository.GetAppointments(ctx, "2026-09-28")
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+
+	if len(appointments) != 3 {
+		t.Fatalf("expected 3 appointments, got %d", len(appointments))
+	}
+
+	for _, appointment := range appointments {
+		isCancelled := appointment.ID == cancelled.ID
+
+		expected := models.AppointmentStatusConfirmed
+
+		if isCancelled {
+			expected = models.AppointmentStatusCancelled
+		}
+
+		if appointment.Status != expected {
+			t.Errorf(
+				"expected appointment %d to be %q, got %q",
+				appointment.ID,
+				expected,
+				appointment.Status,
+			)
+		}
+
+		if (appointment.CancelledAt != nil) != isCancelled {
+			t.Errorf(
+				"expected CancelledAt to be set only on appointment %d, got %v on %d",
+				cancelled.ID,
+				appointment.CancelledAt,
+				appointment.ID,
+			)
+		}
+	}
+}
+
+func TestCancel_FreesSlotForRebooking(t *testing.T) {
 	repository := newTestRepository(t)
 	ctx := context.Background()
 
@@ -538,13 +678,19 @@ func TestCreate_CancelledAppointmentDoesNotHoldSlot(t *testing.T) {
 		t.Fatalf("failed to create appointment: %v", err)
 	}
 
-	markCancelled(t, cancelled.ID)
+	if _, err := repository.Cancel(ctx, cancelled.ID); err != nil {
+		t.Fatalf("failed to cancel appointment: %v", err)
+	}
 
-	if err := repository.Create(
-		ctx,
-		newAppointment("2026-09-28", "10:00", "11:00"),
-	); err != nil {
+	rebooked := newAppointment("2026-09-28", "10:00", "11:00")
+
+	if err := repository.Create(ctx, rebooked); err != nil {
 		t.Fatalf("expected the cancelled slot to be bookable, got %v", err)
+	}
+
+	if rebooked.ID == cancelled.ID ||
+		rebooked.Status != models.AppointmentStatusConfirmed {
+		t.Fatalf("expected a new confirmed appointment, got %+v", rebooked)
 	}
 
 	// The new booking is confirmed, so it holds the slot again.
@@ -555,6 +701,64 @@ func TestCreate_CancelledAppointmentDoesNotHoldSlot(t *testing.T) {
 
 	if !errors.Is(err, ErrAppointmentConflict) {
 		t.Fatalf("expected ErrAppointmentConflict, got %v", err)
+	}
+}
+
+func TestCancel_ConcurrentCancellationsOnlyOneSucceeds(t *testing.T) {
+	repository := newTestRepository(t)
+	ctx := context.Background()
+
+	appointment := newAppointment("2026-09-28", "10:00", "11:00")
+
+	if err := repository.Create(ctx, appointment); err != nil {
+		t.Fatalf("failed to create appointment: %v", err)
+	}
+
+	const attempts = 10
+
+	var (
+		wg        sync.WaitGroup
+		mu        sync.Mutex
+		succeeded int
+		notFound  int
+		others    []error
+	)
+
+	for range attempts {
+		wg.Add(1)
+
+		go func() {
+			defer wg.Done()
+
+			_, err := repository.Cancel(ctx, appointment.ID)
+
+			mu.Lock()
+			defer mu.Unlock()
+
+			switch {
+			case err == nil:
+				succeeded++
+			case errors.Is(err, ErrAppointmentNotFound):
+				notFound++
+			default:
+				others = append(others, err)
+			}
+		}()
+	}
+
+	wg.Wait()
+
+	if len(others) > 0 {
+		t.Fatalf("unexpected errors: %v", others)
+	}
+
+	if succeeded != 1 || notFound != attempts-1 {
+		t.Fatalf(
+			"expected 1 success and %d not found, got %d and %d",
+			attempts-1,
+			succeeded,
+			notFound,
+		)
 	}
 }
 

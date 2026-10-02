@@ -213,3 +213,60 @@ func (r *AppointmentRepository) Delete(
 
 	return &appointment, nil
 }
+
+// Cancel marks the confirmed appointment with the given ID as cancelled,
+// freeing its slot while keeping it stored, and returns it as updated.
+// Only a confirmed appointment matches, and checking and updating in a
+// single statement means that when the same appointment is cancelled
+// twice, even concurrently, exactly one call succeeds. It returns
+// ErrAppointmentNotFound when no confirmed appointment has that ID,
+// including when it is already cancelled.
+func (r *AppointmentRepository) Cancel(
+	ctx context.Context,
+	id int64,
+) (*models.Appointment, error) {
+	query := `
+		UPDATE appointments
+		SET
+			status = 'cancelled',
+			cancelled_at = NOW()
+		WHERE id = $1
+			AND status = 'confirmed'
+		RETURNING
+			id,
+			appointment_date,
+			start_time,
+			end_time,
+			customer_name,
+			customer_phone,
+			customer_email,
+			status,
+			created_at,
+			cancelled_at
+	`
+
+	var appointment models.Appointment
+
+	err := r.db.QueryRowContext(ctx, query, id).Scan(
+		&appointment.ID,
+		&appointment.AppointmentDate,
+		&appointment.StartTime,
+		&appointment.EndTime,
+		&appointment.CustomerName,
+		&appointment.CustomerPhone,
+		&appointment.CustomerEmail,
+		&appointment.Status,
+		&appointment.CreatedAt,
+		&appointment.CancelledAt,
+	)
+
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrAppointmentNotFound
+	}
+
+	if err != nil {
+		return nil, fmt.Errorf("failed to cancel appointment: %w", err)
+	}
+
+	return &appointment, nil
+}
