@@ -1,5 +1,7 @@
 "use client";
 
+import { SignOutButton } from "@clerk/nextjs";
+import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { ErrorMessage } from "@/components/ErrorMessage";
 import { formatDisplayDate } from "@/lib/date";
@@ -78,11 +80,11 @@ export default function AdminPage() {
         setState((current) =>
             current.status === "loaded"
                 ? {
-                      ...current,
-                      appointments: current.appointments.filter(
-                          (appointment) => appointment.id !== id,
-                      ),
-                  }
+                    ...current,
+                    appointments: current.appointments.filter(
+                        (appointment) => appointment.id !== id,
+                    ),
+                }
                 : current,
         );
     }
@@ -127,6 +129,25 @@ export default function AdminPage() {
 
     return (
         <main className="mx-auto w-full max-w-5xl px-4 py-10 sm:px-6 sm:py-14">
+            <nav className="mb-8 flex items-center justify-between gap-4">
+                <Link
+                    href="/"
+                    className="rounded-lg py-1.5 text-sm font-medium text-slate-600 transition-colors hover:text-teal-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-600"
+                >
+                    <span aria-hidden="true">←</span> Back to booking
+                </Link>
+
+                {/* Clerk ends the session; /admin then shows the sign-in again. */}
+                <SignOutButton redirectUrl="/admin">
+                    <button
+                        type="button"
+                        className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-800 shadow-sm transition-colors hover:bg-slate-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-600"
+                    >
+                        Logout
+                    </button>
+                </SignOutButton>
+            </nav>
+
             <header>
                 <h1 className="text-2xl font-semibold tracking-tight text-slate-900 sm:text-3xl">
                     Admin Dashboard

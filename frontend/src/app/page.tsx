@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import {
   AppointmentForm,
@@ -206,22 +207,30 @@ export default function Home() {
 
   return (
     <main className="mx-auto w-full max-w-2xl px-4 py-12 sm:py-16">
-      <header className="mb-10 text-center">
+      <nav className="mb-10 flex items-center justify-between">
         <p className="text-sm font-semibold uppercase tracking-[0.2em] text-teal-700">
           Terminuler
         </p>
 
-        {!createdAppointment && (
-          <>
-            <h1 className="mt-3 text-3xl font-semibold tracking-tight text-slate-900 sm:text-4xl">
-              Book your appointment
-            </h1>
-            <p className="mt-3 text-slate-600">
-              Choose a date and a convenient time for your visit.
-            </p>
-          </>
-        )}
-      </header>
+        {/* Only navigates: the proxy shows the Clerk sign-in when needed. */}
+        <Link
+          href="/admin"
+          className="rounded-lg px-3 py-1.5 text-sm font-medium text-slate-600 transition-colors hover:bg-slate-100 hover:text-slate-900 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-600"
+        >
+          Admin
+        </Link>
+      </nav>
+
+      {!createdAppointment && (
+        <header className="mb-10 text-center">
+          <h1 className="text-3xl font-semibold tracking-tight text-slate-900 sm:text-4xl">
+            Book your appointment
+          </h1>
+          <p className="mt-3 text-slate-600">
+            Choose a date and a convenient time for your visit.
+          </p>
+        </header>
+      )}
 
       {createdAppointment ? (
         <AppointmentSuccess
