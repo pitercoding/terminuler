@@ -17,6 +17,12 @@ export interface CreateAppointmentRequest {
     customer_email: string;
 }
 
+/**
+ * A confirmed appointment holds its slot; a cancelled one stays stored for
+ * the history but frees its slot.
+ */
+export type AppointmentStatus = "confirmed" | "cancelled";
+
 export interface Appointment {
     id: number;
     appointment_date: string;
@@ -25,7 +31,10 @@ export interface Appointment {
     customer_name: string;
     customer_phone: string;
     customer_email: string;
+    status: AppointmentStatus;
     created_at: string;
+    // Null unless status is "cancelled".
+    cancelled_at: string | null;
 }
 
 interface ErrorResponse {
@@ -109,8 +118,9 @@ export async function createAppointment(
     return data as Appointment;
 }
 /**
- * Returns the upcoming appointments, from today onwards. Only the admin can
- * list them: other users get a 401 or 403 AppointmentApiError.
+ * Returns the upcoming appointments, from today onwards, both confirmed and
+ * cancelled. Only the admin can list them: other users get a 401 or 403
+ * AppointmentApiError.
  */
 export async function getAdminAppointments(): Promise<Appointment[]> {
     const response = await fetch("/api/admin/appointments", {
@@ -130,9 +140,10 @@ export async function getAdminAppointments(): Promise<Appointment[]> {
 }
 
 /**
- * Cancels the appointment with the given ID, freeing its slot. Only the admin
- * can cancel: other users get a 401 or 403 AppointmentApiError, and an
- * appointment that no longer exists gets a 404.
+ * Cancels the appointment with the given ID, freeing its slot while keeping
+ * it in the history. Only the admin can cancel: other users get a 401 or 403
+ * AppointmentApiError, and an appointment that does not exist or is already
+ * cancelled gets a 404.
  */
 export async function cancelAdminAppointment(id: number): Promise<void> {
     const response = await fetch(`/api/admin/appointments/${id}`, {

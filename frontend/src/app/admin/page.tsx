@@ -10,6 +10,7 @@ import {
     cancelAdminAppointment,
     getAdminAppointments,
     type Appointment,
+    type AppointmentStatus,
 } from "@/services/appointmentService";
 
 type AppointmentsState =
@@ -76,13 +77,26 @@ export default function AdminPage() {
         loadAppointments().then(setState);
     }
 
-    function removeAppointment(id: number) {
+    /**
+     * Marks the appointment as cancelled in place, so it stays in the
+     * history. The API answers 204 without a body, so cancelled_at is the
+     * browser's time until the next load brings the stored one.
+     */
+    function markCancelled(id: number) {
+        const cancelledAt = new Date().toISOString();
+
         setState((current) =>
             current.status === "loaded"
                 ? {
                     ...current,
-                    appointments: current.appointments.filter(
-                        (appointment) => appointment.id !== id,
+                    appointments: current.appointments.map((appointment) =>
+                        appointment.id === id
+                            ? {
+                                ...appointment,
+                                status: "cancelled",
+                                cancelled_at: cancelledAt,
+                            }
+                            : appointment,
                     ),
                 }
                 : current,
@@ -110,12 +124,12 @@ export default function AdminPage() {
         try {
             await cancelAdminAppointment(pendingCancel.id);
 
-            removeAppointment(pendingCancel.id);
+            markCancelled(pendingCancel.id);
             closeCancelDialog();
         } catch (err) {
             // Already cancelled elsewhere: the outcome the admin wanted.
             if (err instanceof AppointmentApiError && err.status === 404) {
-                removeAppointment(pendingCancel.id);
+                markCancelled(pendingCancel.id);
                 closeCancelDialog();
             } else {
                 setCancelError(
@@ -221,7 +235,7 @@ interface AppointmentsTableProps {
 function AppointmentsTable({ appointments, onCancel }: AppointmentsTableProps) {
     return (
         <div className="-mx-6 overflow-x-auto sm:-mx-8">
-            <table className="w-full min-w-184 text-left text-sm">
+            <table className="w-full min-w-208 text-left text-sm">
                 <thead className="border-b border-slate-200 text-slate-500">
                     <tr>
                         <th scope="col" className="px-6 py-3 font-medium sm:px-8">
@@ -238,6 +252,9 @@ function AppointmentsTable({ appointments, onCancel }: AppointmentsTableProps) {
                         </th>
                         <th scope="col" className="px-3 py-3 font-medium">
                             Email
+                        </th>
+                        <th scope="col" className="px-3 py-3 font-medium">
+                            Status
                         </th>
                         <th
                             scope="col"
@@ -274,21 +291,65 @@ function AppointmentsTable({ appointments, onCancel }: AppointmentsTableProps) {
                                     {appointment.customer_email}
                                 </a>
                             </td>
+                            <td className="whitespace-nowrap px-3 py-3">
+                                <StatusBadge status={appointment.status} />
+                            </td>
                             <td className="px-6 py-3 text-right sm:px-8">
-                                <button
-                                    type="button"
-                                    onClick={() => onCancel(appointment)}
-                                    aria-label={`Cancel appointment of ${appointment.customer_name} on ${formatDisplayDate(appointment.appointment_date)} at ${appointment.start_time}`}
-                                    className="rounded-lg px-3 py-1.5 text-sm font-semibold text-red-700 hover:bg-red-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-600"
-                                >
-                                    Cancel
-                                </button>
+                                {/* A cancelled appointment cannot be cancelled again. */}
+                                {appointment.status === "confirmed" ? (
+                                    <button
+                                        type="button"
+                                        onClick={() => onCancel(appointment)}
+                                        aria-label={`Cancel appointment of ${appointment.customer_name} on ${formatDisplayDate(appointment.appointment_date)} at ${appointment.start_time}`}
+                                        className="rounded-lg px-3 py-1.5 text-sm font-semibold text-red-700 hover:bg-red-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-600"
+                                    >
+                                        Cancel
+                                    </button>
+                                ) : (
+                                    <span className="px-3 text-slate-400">
+                                        <span aria-hidden="true">—</span>
+                                        <span className="sr-only">No actions</span>
+                                    </span>
+                                )}
                             </td>
                         </tr>
                     ))}
                 </tbody>
             </table>
         </div>
+    );
+}
+
+const statusBadges: Record<
+    AppointmentStatus,
+    { label: string; className: string }
+> = {
+    confirmed: {
+        label: "Confirmed",
+        className: "bg-teal-50 text-teal-700 ring-teal-600/20",
+    },
+    cancelled: {
+        label: "Cancelled",
+        className: "bg-slate-100 text-slate-600 ring-slate-500/20",
+    },
+};
+
+// Shown for a status this page does not know, e.g. from an outdated API,
+// instead of breaking the whole table.
+const unknownStatusBadge = {
+    label: "Unknown",
+    className: "bg-amber-50 text-amber-800 ring-amber-600/20",
+};
+
+function StatusBadge({ status }: { status: AppointmentStatus }) {
+    const badge = statusBadges[status] ?? unknownStatusBadge;
+
+    return (
+        <span
+            className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ring-1 ring-inset ${badge.className}`}
+        >
+            {badge.label}
+        </span>
     );
 }
 
