@@ -14,10 +14,12 @@ import (
 )
 
 type AppointmentRepository interface {
+	// GetByDate returns only the appointments that hold a slot on date,
+	// so cancelled appointments are left out.
 	GetByDate(ctx context.Context, date string) ([]models.Appointment, error)
 	GetAppointments(ctx context.Context, fromDate string) ([]models.Appointment, error)
 	Create(ctx context.Context, appointment *models.Appointment) error
-	Delete(ctx context.Context, id int64) (*models.Appointment, error)
+	Cancel(ctx context.Context, id int64) (*models.Appointment, error)
 }
 
 type AvailableSlot struct {
@@ -365,20 +367,21 @@ func (s *AppointmentService) ListAppointments(
 	return result, nil
 }
 
-// DeleteAppointment cancels the appointment with the given ID and emails
-// the customer. Its slot becomes available again because availability is
-// computed from the stored appointments. A missing appointment wraps
-// repositories.ErrAppointmentNotFound.
-func (s *AppointmentService) DeleteAppointment(
+// CancelAppointment cancels the confirmed appointment with the given ID and
+// emails the customer. The appointment stays stored for the admin's
+// history, and its slot becomes available again because availability only
+// counts confirmed appointments. A missing or already cancelled appointment
+// wraps repositories.ErrAppointmentNotFound and sends no email.
+func (s *AppointmentService) CancelAppointment(
 	ctx context.Context,
 	id int64,
 ) error {
-	appointment, err := s.repository.Delete(ctx, id)
+	appointment, err := s.repository.Cancel(ctx, id)
 	if err != nil {
-		return fmt.Errorf("failed to delete appointment: %w", err)
+		return fmt.Errorf("failed to cancel appointment: %w", err)
 	}
 
-	// The appointment is already deleted, so an email failure is only logged: returning an error here would tell the admin the cancellation failed.
+	// The appointment is already cancelled, so an email failure is only logged: returning an error here would tell the admin the cancellation failed.
 	if s.email != nil {
 		if err := s.email.SendCancellation(
 			appointment.CustomerEmail,

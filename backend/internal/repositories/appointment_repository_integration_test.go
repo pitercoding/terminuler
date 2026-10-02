@@ -263,6 +263,55 @@ func TestGetByDate_FiltersByDateAndOrdersByStartTime(t *testing.T) {
 	}
 }
 
+func TestGetByDate_LeavesOutCancelledAppointments(t *testing.T) {
+	repository := newTestRepository(t)
+	ctx := context.Background()
+
+	cancelled := newAppointment("2026-09-28", "10:00", "11:00")
+
+	for _, appointment := range []*models.Appointment{
+		newAppointment("2026-09-28", "09:00", "10:00"),
+		cancelled,
+		newAppointment("2026-09-28", "11:00", "12:00"),
+	} {
+		if err := repository.Create(ctx, appointment); err != nil {
+			t.Fatalf("failed to create appointment: %v", err)
+		}
+	}
+
+	if _, err := repository.Cancel(ctx, cancelled.ID); err != nil {
+		t.Fatalf("failed to cancel appointment: %v", err)
+	}
+
+	appointments, err := repository.GetByDate(ctx, "2026-09-28")
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+
+	expected := []string{"09:00:00", "11:00:00"}
+
+	if len(appointments) != len(expected) {
+		t.Fatalf(
+			"expected %d appointments, got %d",
+			len(expected),
+			len(appointments),
+		)
+	}
+
+	for i, appointment := range appointments {
+		if appointment.StartTime != expected[i] ||
+			appointment.Status != models.AppointmentStatusConfirmed {
+			t.Errorf(
+				"expected confirmed appointment %d at %s, got %q at %s",
+				i,
+				expected[i],
+				appointment.Status,
+				appointment.StartTime,
+			)
+		}
+	}
+}
+
 func TestGetByDate_NoAppointments(t *testing.T) {
 	repository := newTestRepository(t)
 
@@ -359,125 +408,6 @@ func TestCreate_DuplicateSlotReturnsConflict(t *testing.T) {
 
 	if !errors.Is(err, ErrAppointmentConflict) {
 		t.Fatalf("expected ErrAppointmentConflict, got %v", err)
-	}
-}
-
-func TestDelete_RemovesOnlyThatAppointment(t *testing.T) {
-	repository := newTestRepository(t)
-	ctx := context.Background()
-
-	deleted := newAppointment("2026-09-28", "10:00", "11:00")
-	kept := newAppointment("2026-09-28", "11:00", "12:00")
-
-	for _, appointment := range []*models.Appointment{deleted, kept} {
-		if err := repository.Create(ctx, appointment); err != nil {
-			t.Fatalf("failed to create appointment: %v", err)
-		}
-	}
-
-	if _, err := repository.Delete(ctx, deleted.ID); err != nil {
-		t.Fatalf("expected no error, got %v", err)
-	}
-
-	appointments, err := repository.GetAppointments(ctx, "2026-09-28")
-	if err != nil {
-		t.Fatalf("expected no error, got %v", err)
-	}
-
-	if len(appointments) != 1 || appointments[0].ID != kept.ID {
-		t.Fatalf("expected only appointment %d to remain, got %+v", kept.ID, appointments)
-	}
-}
-
-func TestDelete_FreesSlotForRebooking(t *testing.T) {
-	repository := newTestRepository(t)
-	ctx := context.Background()
-
-	appointment := newAppointment("2026-09-28", "10:00", "11:00")
-
-	if err := repository.Create(ctx, appointment); err != nil {
-		t.Fatalf("failed to create appointment: %v", err)
-	}
-
-	if _, err := repository.Delete(ctx, appointment.ID); err != nil {
-		t.Fatalf("failed to delete appointment: %v", err)
-	}
-
-	if err := repository.Create(
-		ctx,
-		newAppointment("2026-09-28", "10:00", "11:00"),
-	); err != nil {
-		t.Fatalf("expected the freed slot to be bookable, got %v", err)
-	}
-}
-
-func TestDelete_NonexistentReturnsNotFound(t *testing.T) {
-	repository := newTestRepository(t)
-
-	deleted, err := repository.Delete(context.Background(), 999)
-
-	if !errors.Is(err, ErrAppointmentNotFound) {
-		t.Fatalf("expected ErrAppointmentNotFound, got %v", err)
-	}
-
-	if deleted != nil {
-		t.Fatalf("expected no appointment, got %+v", deleted)
-	}
-}
-
-func TestDelete_ReturnsDeletedAppointment(t *testing.T) {
-	repository := newTestRepository(t)
-	ctx := context.Background()
-
-	appointment := newAppointment("2026-09-28", "10:00", "11:00")
-
-	if err := repository.Create(ctx, appointment); err != nil {
-		t.Fatalf("failed to create appointment: %v", err)
-	}
-
-	deleted, err := repository.Delete(ctx, appointment.ID)
-	if err != nil {
-		t.Fatalf("expected no error, got %v", err)
-	}
-
-	if deleted.ID != appointment.ID ||
-		deleted.AppointmentDate.Format("2006-01-02") != "2026-09-28" ||
-		deleted.CustomerName != appointment.CustomerName ||
-		deleted.CustomerPhone != appointment.CustomerPhone ||
-		deleted.CustomerEmail != appointment.CustomerEmail ||
-		!deleted.CreatedAt.Equal(appointment.CreatedAt) {
-		t.Fatalf("expected the deleted appointment %+v, got %+v", appointment, deleted)
-	}
-
-	// PostgreSQL returns TIME values with seconds.
-	if deleted.StartTime != "10:00:00" || deleted.EndTime != "11:00:00" {
-		t.Errorf(
-			"expected times 10:00:00-11:00:00, got %s-%s",
-			deleted.StartTime,
-			deleted.EndTime,
-		)
-	}
-}
-
-func TestDelete_TwiceReturnsNotFound(t *testing.T) {
-	repository := newTestRepository(t)
-	ctx := context.Background()
-
-	appointment := newAppointment("2026-09-28", "10:00", "11:00")
-
-	if err := repository.Create(ctx, appointment); err != nil {
-		t.Fatalf("failed to create appointment: %v", err)
-	}
-
-	if _, err := repository.Delete(ctx, appointment.ID); err != nil {
-		t.Fatalf("failed to delete appointment: %v", err)
-	}
-
-	if _, err := repository.Delete(ctx, appointment.ID); !errors.Is(
-		err,
-		ErrAppointmentNotFound,
-	) {
-		t.Fatalf("expected ErrAppointmentNotFound, got %v", err)
 	}
 }
 
@@ -922,41 +852,242 @@ func TestAppointmentFlow(t *testing.T) {
 	}
 }
 
-// TestCancelAppointmentFlow makes sure a cancelled appointment's slot is
-// listed as available again, with no extra state to release it.
-func TestCancelAppointmentFlow(t *testing.T) {
-	repository := newTestRepository(t)
-	ctx := context.Background()
+// countingEmailSender counts the emails sent through it. It is safe for
+// concurrent use.
+type countingEmailSender struct {
+	mu            sync.Mutex
+	confirmations int
+	cancellations int
+}
 
-	service := services.NewAppointmentService(
+func (s *countingEmailSender) SendConfirmation(
+	to string,
+	customerName string,
+	appointmentDate string,
+	startTime string,
+	endTime string,
+) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	s.confirmations++
+
+	return nil
+}
+
+func (s *countingEmailSender) SendCancellation(
+	to string,
+	customerName string,
+	appointmentDate string,
+	startTime string,
+	endTime string,
+) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	s.cancellations++
+
+	return nil
+}
+
+func (s *countingEmailSender) cancellationCount() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	return s.cancellations
+}
+
+// newFlowService returns a service backed by the real repository, with a
+// clock fixed before 2026-09-28 so every slot of that day is bookable.
+func newFlowService(
+	repository *AppointmentRepository,
+	emailSender *countingEmailSender,
+) *services.AppointmentService {
+	return services.NewAppointmentServiceWithEmail(
 		repository,
+		emailSender,
 		func() time.Time {
 			return time.Date(2026, time.September, 25, 12, 0, 0, 0, time.UTC)
 		},
 	)
+}
 
-	appointment, err := service.Create(ctx, services.CreateAppointmentInput{
+func flowInput(startTime string, endTime string) services.CreateAppointmentInput {
+	return services.CreateAppointmentInput{
 		AppointmentDate: "2026-09-28",
-		StartTime:       "10:00",
-		EndTime:         "11:00",
+		StartTime:       startTime,
+		EndTime:         endTime,
 		CustomerName:    "Racha Cuca",
 		CustomerPhone:   "+5511999999999",
 		CustomerEmail:   "rc@exemple.com",
-	})
+	}
+}
+
+// availableStartTimes returns the start times listed as available on
+// 2026-09-28.
+func availableStartTimes(
+	t *testing.T,
+	service *services.AppointmentService,
+) map[string]bool {
+	t.Helper()
+
+	slots, err := service.GetAvailableSlots(context.Background(), "2026-09-28")
+	if err != nil {
+		t.Fatalf("failed to get available slots: %v", err)
+	}
+
+	available := make(map[string]bool, len(slots))
+
+	for _, slot := range slots {
+		available[slot.StartTime] = true
+	}
+
+	return available
+}
+
+// TestCancelAppointmentFlow cancels one of three appointments through the
+// service and checks that it stays stored as cancelled, that the customer
+// gets exactly one email, and that only its slot becomes available again.
+func TestCancelAppointmentFlow(t *testing.T) {
+	repository := newTestRepository(t)
+	ctx := context.Background()
+	emailSender := &countingEmailSender{}
+	service := newFlowService(repository, emailSender)
+
+	var cancelled *models.Appointment
+
+	for _, times := range [][2]string{
+		{"09:00", "10:00"},
+		{"10:00", "11:00"},
+		{"11:00", "12:00"},
+	} {
+		appointment, err := service.Create(ctx, flowInput(times[0], times[1]))
+		if err != nil {
+			t.Fatalf("failed to create appointment at %s: %v", times[0], err)
+		}
+
+		if times[0] == "10:00" {
+			cancelled = appointment
+		}
+	}
+
+	if err := service.CancelAppointment(ctx, cancelled.ID); err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+
+	if count := emailSender.cancellationCount(); count != 1 {
+		t.Fatalf("expected 1 cancellation email, got %d", count)
+	}
+
+	appointments, err := repository.GetAppointments(ctx, "2026-09-28")
+	if err != nil {
+		t.Fatalf("failed to list appointments: %v", err)
+	}
+
+	if len(appointments) != 3 {
+		t.Fatalf("expected all 3 appointments to stay stored, got %d", len(appointments))
+	}
+
+	for _, appointment := range appointments {
+		if appointment.ID == cancelled.ID &&
+			(appointment.Status != models.AppointmentStatusCancelled ||
+				appointment.CancelledAt == nil) {
+			t.Errorf("expected appointment %d to be cancelled, got %+v", cancelled.ID, appointment)
+		}
+	}
+
+	// Cancelling again finds no confirmed appointment and sends no email.
+	if err := service.CancelAppointment(ctx, cancelled.ID); !errors.Is(
+		err,
+		ErrAppointmentNotFound,
+	) {
+		t.Fatalf("expected ErrAppointmentNotFound on second cancellation, got %v", err)
+	}
+
+	if count := emailSender.cancellationCount(); count != 1 {
+		t.Fatalf("expected still 1 cancellation email, got %d", count)
+	}
+
+	available := availableStartTimes(t, service)
+
+	if available["09:00"] || available["11:00"] {
+		t.Errorf("expected 09:00 and 11:00 to stay booked, got %v", available)
+	}
+
+	if !available["10:00"] {
+		t.Errorf("expected the cancelled 10:00 slot to be available, got %v", available)
+	}
+
+	if len(available) != 6 {
+		t.Errorf("expected 6 available slots, got %d", len(available))
+	}
+}
+
+// TestCancelAppointmentFlow_RebookingKeepsDoubleBookingProtection books a
+// cancelled slot again with concurrent requests: exactly one succeeds, and
+// the slot is booked again.
+func TestCancelAppointmentFlow_RebookingKeepsDoubleBookingProtection(t *testing.T) {
+	repository := newTestRepository(t)
+	ctx := context.Background()
+	service := newFlowService(repository, &countingEmailSender{})
+
+	appointment, err := service.Create(ctx, flowInput("10:00", "11:00"))
 	if err != nil {
 		t.Fatalf("failed to create appointment: %v", err)
 	}
 
-	if err := service.DeleteAppointment(ctx, appointment.ID); err != nil {
-		t.Fatalf("expected no error, got %v", err)
+	if err := service.CancelAppointment(ctx, appointment.ID); err != nil {
+		t.Fatalf("failed to cancel appointment: %v", err)
 	}
 
-	slots, err := service.GetAvailableSlots(ctx, "2026-09-28")
-	if err != nil {
-		t.Fatalf("expected no error, got %v", err)
+	const attempts = 10
+
+	var (
+		wg        sync.WaitGroup
+		mu        sync.Mutex
+		succeeded int
+		conflicts int
+		others    []error
+	)
+
+	for range attempts {
+		wg.Add(1)
+
+		go func() {
+			defer wg.Done()
+
+			_, err := service.Create(ctx, flowInput("10:00", "11:00"))
+
+			mu.Lock()
+			defer mu.Unlock()
+
+			switch {
+			case err == nil:
+				succeeded++
+			case errors.Is(err, ErrAppointmentConflict):
+				conflicts++
+			default:
+				others = append(others, err)
+			}
+		}()
 	}
 
-	if len(slots) != 8 {
-		t.Fatalf("expected all 8 slots to be available, got %d", len(slots))
+	wg.Wait()
+
+	if len(others) > 0 {
+		t.Fatalf("unexpected errors: %v", others)
+	}
+
+	if succeeded != 1 || conflicts != attempts-1 {
+		t.Fatalf(
+			"expected 1 success and %d conflicts, got %d and %d",
+			attempts-1,
+			succeeded,
+			conflicts,
+		)
+	}
+
+	if availableStartTimes(t, service)["10:00"] {
+		t.Error("expected the rebooked 10:00 slot to be unavailable")
 	}
 }

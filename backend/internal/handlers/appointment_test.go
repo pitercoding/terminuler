@@ -60,7 +60,7 @@ func (m *mockAppointmentRepository) Create(
 	return nil
 }
 
-func (m *mockAppointmentRepository) Delete(
+func (m *mockAppointmentRepository) Cancel(
 	ctx context.Context,
 	id int64,
 ) (*models.Appointment, error) {

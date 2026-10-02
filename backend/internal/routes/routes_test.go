@@ -48,7 +48,7 @@ func (s *stubAppointmentRepository) Create(
 	return nil
 }
 
-func (s *stubAppointmentRepository) Delete(
+func (s *stubAppointmentRepository) Cancel(
 	ctx context.Context,
 	id int64,
 ) (*models.Appointment, error) {

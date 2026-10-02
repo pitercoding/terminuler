@@ -24,6 +24,9 @@ func NewAppointmentRepository(db *sql.DB) *AppointmentRepository {
 	}
 }
 
+// GetByDate returns the appointments that hold a slot on date (YYYY-MM-DD),
+// ordered by start time. Only confirmed appointments hold a slot, so
+// cancelled ones are left out.
 func (r *AppointmentRepository) GetByDate(
 	ctx context.Context,
 	date string,
@@ -42,6 +45,7 @@ func (r *AppointmentRepository) GetByDate(
 			cancelled_at
 		FROM appointments
 		WHERE appointment_date = $1
+			AND status = 'confirmed'
 		ORDER BY start_time
 	`
 
@@ -54,7 +58,8 @@ func (r *AppointmentRepository) GetByDate(
 }
 
 // GetAppointments returns the appointments on or after fromDate
-// (YYYY-MM-DD), in chronological order.
+// (YYYY-MM-DD), in chronological order, including cancelled ones so the
+// admin keeps their history.
 func (r *AppointmentRepository) GetAppointments(
 	ctx context.Context,
 	fromDate string,
@@ -165,53 +170,6 @@ func (r *AppointmentRepository) Create(
 	}
 
 	return nil
-}
-
-// Delete removes the appointment with the given ID, freeing its slot, and
-// returns it as it was stored. Reading and deleting in a single statement
-// means the returned data belongs to the row this call removed, even when
-// the same appointment is cancelled twice concurrently. It returns
-// ErrAppointmentNotFound when no appointment has that ID.
-func (r *AppointmentRepository) Delete(
-	ctx context.Context,
-	id int64,
-) (*models.Appointment, error) {
-	query := `
-		DELETE FROM appointments
-		WHERE id = $1
-		RETURNING
-			id,
-			appointment_date,
-			start_time,
-			end_time,
-			customer_name,
-			customer_phone,
-			customer_email,
-			created_at
-	`
-
-	var appointment models.Appointment
-
-	err := r.db.QueryRowContext(ctx, query, id).Scan(
-		&appointment.ID,
-		&appointment.AppointmentDate,
-		&appointment.StartTime,
-		&appointment.EndTime,
-		&appointment.CustomerName,
-		&appointment.CustomerPhone,
-		&appointment.CustomerEmail,
-		&appointment.CreatedAt,
-	)
-
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil, ErrAppointmentNotFound
-	}
-
-	if err != nil {
-		return nil, fmt.Errorf("failed to delete appointment: %w", err)
-	}
-
-	return &appointment, nil
 }
 
 // Cancel marks the confirmed appointment with the given ID as cancelled,

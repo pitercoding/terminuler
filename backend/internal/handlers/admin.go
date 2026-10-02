@@ -60,7 +60,7 @@ func (h *AppointmentHandler) DeleteAppointment(
 		return
 	}
 
-	if err := h.service.DeleteAppointment(r.Context(), id); err != nil {
+	if err := h.service.CancelAppointment(r.Context(), id); err != nil {
 		writeServiceError(w, err)
 		return
 	}
