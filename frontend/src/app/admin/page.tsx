@@ -4,6 +4,7 @@ import { SignOutButton } from "@clerk/nextjs";
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { ErrorMessage } from "@/components/ErrorMessage";
+import { inputClassName, labelClassName } from "@/components/styles";
 import { formatDisplayDate } from "@/lib/date";
 import {
     AppointmentApiError,
@@ -17,6 +18,40 @@ type AppointmentsState =
     | { status: "loading" }
     | { status: "error"; message: string; canRetry: boolean }
     | { status: "loaded"; appointments: Appointment[] };
+
+type AppointmentStatusFilter = "all" | AppointmentStatus;
+
+const statusFilterOptions: { value: AppointmentStatusFilter; label: string }[] =
+    [
+        { value: "all", label: "All" },
+        { value: "confirmed", label: "Confirmed" },
+        { value: "cancelled", label: "Cancelled" },
+    ];
+
+// Narrows the <select> value, a plain string, back to the filter type.
+function isStatusFilter(value: string): value is AppointmentStatusFilter {
+    return statusFilterOptions.some((option) => option.value === value);
+}
+
+/**
+ * Tells whether the appointment passes both filters. The query must already
+ * be trimmed and lowercased; an empty query matches every appointment.
+ */
+function matchesFilters(
+    appointment: Appointment,
+    query: string,
+    status: AppointmentStatusFilter,
+): boolean {
+    if (status !== "all" && appointment.status !== status) {
+        return false;
+    }
+
+    return [
+        appointment.customer_name,
+        appointment.customer_phone,
+        appointment.customer_email,
+    ].some((field) => field.toLowerCase().includes(query));
+}
 
 /**
  * Returns the message shown when the appointments cannot be loaded. A 403
@@ -71,6 +106,34 @@ export default function AdminPage() {
     );
     const [cancelling, setCancelling] = useState(false);
     const [cancelError, setCancelError] = useState<string | null>(null);
+
+    // Filters are page state only: a reload starts again from all appointments.
+    const [search, setSearch] = useState("");
+    const [statusFilter, setStatusFilter] =
+        useState<AppointmentStatusFilter>("all");
+    const searchInputRef = useRef<HTMLInputElement>(null);
+
+    const query = search.trim().toLowerCase();
+    const filtersActive = query !== "" || statusFilter !== "all";
+
+    // Derived on every render, so a cancelled row leaves or stays in the
+    // list according to the current status filter, with no extra logic.
+    const filteredAppointments =
+        state.status === "loaded"
+            ? state.appointments.filter((appointment) =>
+                matchesFilters(appointment, query, statusFilter),
+            )
+            : [];
+
+    /**
+     * Resets both filters and moves focus to the search field, since the
+     * "Clear filters" button that was used may disappear.
+     */
+    function clearFilters() {
+        setSearch("");
+        setStatusFilter("all");
+        searchInputRef.current?.focus();
+    }
 
     function handleRetry() {
         setState({ status: "loading" });
@@ -206,10 +269,101 @@ export default function AdminPage() {
                                 No upcoming appointments.
                             </p>
                         ) : (
-                            <AppointmentsTable
-                                appointments={state.appointments}
-                                onCancel={openCancelDialog}
-                            />
+                            <>
+                                <div className="flex flex-col gap-4 sm:flex-row sm:items-end">
+                                    <div className="sm:flex-1">
+                                        <label
+                                            htmlFor="appointment-search"
+                                            className={labelClassName}
+                                        >
+                                            Search
+                                        </label>
+                                        <input
+                                            ref={searchInputRef}
+                                            id="appointment-search"
+                                            type="search"
+                                            value={search}
+                                            onChange={(event) =>
+                                                setSearch(event.target.value)
+                                            }
+                                            placeholder="Search appointments..."
+                                            autoComplete="off"
+                                            className={inputClassName}
+                                        />
+                                    </div>
+
+                                    <div className="sm:w-44">
+                                        <label
+                                            htmlFor="appointment-status-filter"
+                                            className={labelClassName}
+                                        >
+                                            Status
+                                        </label>
+                                        <select
+                                            id="appointment-status-filter"
+                                            value={statusFilter}
+                                            onChange={(event) => {
+                                                if (isStatusFilter(event.target.value)) {
+                                                    setStatusFilter(event.target.value);
+                                                }
+                                            }}
+                                            className={inputClassName}
+                                        >
+                                            {statusFilterOptions.map((option) => (
+                                                <option
+                                                    key={option.value}
+                                                    value={option.value}
+                                                >
+                                                    {option.label}
+                                                </option>
+                                            ))}
+                                        </select>
+                                    </div>
+
+                                    <button
+                                        type="button"
+                                        onClick={clearFilters}
+                                        disabled={!filtersActive}
+                                        className="rounded-lg border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-800 shadow-sm transition-colors hover:bg-slate-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-600 disabled:cursor-not-allowed disabled:opacity-60"
+                                    >
+                                        Clear filters
+                                    </button>
+                                </div>
+
+                                {/* Announced to screen readers as the filters change. */}
+                                <p
+                                    role="status"
+                                    className="mt-4 text-sm text-slate-500"
+                                >
+                                    Showing {filteredAppointments.length} of{" "}
+                                    {state.appointments.length}{" "}
+                                    {state.appointments.length === 1
+                                        ? "appointment"
+                                        : "appointments"}
+                                </p>
+
+                                <div className="mt-4">
+                                    {filteredAppointments.length === 0 ? (
+                                        <div className="rounded-xl bg-slate-50 px-4 py-6 text-center">
+                                            <p className="text-sm text-slate-600">
+                                                No appointments match your filters.
+                                            </p>
+                                            <button
+                                                type="button"
+                                                onClick={clearFilters}
+                                                className="mt-3 rounded-lg px-3 py-1.5 text-sm font-semibold text-teal-700 hover:bg-teal-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-600"
+                                            >
+                                                Clear filters
+                                            </button>
+                                        </div>
+                                    ) : (
+                                        <AppointmentsTable
+                                            appointments={filteredAppointments}
+                                            onCancel={openCancelDialog}
+                                        />
+                                    )}
+                                </div>
+                            </>
                         ))}
                 </div>
             </section>
