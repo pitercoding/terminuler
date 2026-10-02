@@ -206,10 +206,10 @@ export default function AdminPage() {
 
     return (
         <main className="mx-auto w-full max-w-5xl px-4 py-10 sm:px-6 sm:py-14">
-            <nav className="mb-8 flex items-center justify-between gap-4">
+            <nav className="mb-8 flex flex-wrap items-center justify-between gap-4">
                 <Link
                     href="/"
-                    className="rounded-lg py-1.5 text-sm font-medium text-slate-600 transition-colors hover:text-teal-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-600"
+                    className="rounded-lg py-2.5 text-sm font-medium text-slate-600 transition-colors hover:text-teal-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-600"
                 >
                     <span aria-hidden="true">←</span> Back to booking
                 </Link>
@@ -218,7 +218,7 @@ export default function AdminPage() {
                 <SignOutButton redirectUrl="/admin">
                     <button
                         type="button"
-                        className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-800 shadow-sm transition-colors hover:bg-slate-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-600"
+                        className="rounded-lg border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-800 shadow-sm transition-colors hover:bg-slate-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-600"
                     >
                         Logout
                     </button>
@@ -237,7 +237,7 @@ export default function AdminPage() {
             <section
                 aria-labelledby="appointments-heading"
                 aria-busy={state.status === "loading"}
-                className="mt-8 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm sm:p-8"
+                className="mt-8 rounded-2xl border border-slate-200 bg-white px-4 py-6 shadow-sm sm:p-8"
             >
                 <h2
                     id="appointments-heading"
@@ -351,16 +351,22 @@ export default function AdminPage() {
                                             <button
                                                 type="button"
                                                 onClick={clearFilters}
-                                                className="mt-3 rounded-lg px-3 py-1.5 text-sm font-semibold text-teal-700 hover:bg-teal-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-600"
+                                                className="mt-3 rounded-lg px-4 py-2.5 text-sm font-semibold text-teal-700 hover:bg-teal-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-600"
                                             >
                                                 Clear filters
                                             </button>
                                         </div>
                                     ) : (
-                                        <AppointmentsTable
-                                            appointments={filteredAppointments}
-                                            onCancel={openCancelDialog}
-                                        />
+                                        <>
+                                            <AppointmentsList
+                                                appointments={filteredAppointments}
+                                                onCancel={openCancelDialog}
+                                            />
+                                            <AppointmentsTable
+                                                appointments={filteredAppointments}
+                                                onCancel={openCancelDialog}
+                                            />
+                                        </>
                                     )}
                                 </div>
                             </>
@@ -381,18 +387,78 @@ export default function AdminPage() {
     );
 }
 
-interface AppointmentsTableProps {
+interface AppointmentsViewProps {
     appointments: Appointment[];
     onCancel: (appointment: Appointment) => void;
 }
 
-function AppointmentsTable({ appointments, onCancel }: AppointmentsTableProps) {
+/**
+ * The appointments as a stacked list, for screens too narrow for the table:
+ * there, the status and the Cancel button would sit far off-screen. The page
+ * renders both views and CSS shows one, so they share the same data and
+ * handler; the hidden one is also hidden from screen readers.
+ */
+function AppointmentsList({ appointments, onCancel }: AppointmentsViewProps) {
     return (
-        <div className="-mx-6 overflow-x-auto sm:-mx-8">
+        <ul className="-mx-4 divide-y divide-slate-100 border-t border-slate-200 text-sm text-slate-700 sm:-mx-8 lg:hidden">
+            {appointments.map((appointment) => (
+                <li key={appointment.id} className="px-4 py-4 sm:px-8">
+                    <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                            <p className="font-medium text-slate-900">
+                                {formatDisplayDate(appointment.appointment_date)}
+                            </p>
+                            <p className="mt-0.5 tabular-nums text-slate-600">
+                                {appointment.start_time}–{appointment.end_time}
+                            </p>
+                        </div>
+                        <StatusBadge status={appointment.status} />
+                    </div>
+
+                    <div className="mt-3 flex items-end justify-between gap-3">
+                        <div className="min-w-0 space-y-1">
+                            <p className="font-medium wrap-break-word text-slate-900">
+                                {appointment.customer_name}
+                            </p>
+                            <p>
+                                <a
+                                    href={`tel:${appointment.customer_phone}`}
+                                    className="hover:text-teal-700 hover:underline"
+                                >
+                                    {appointment.customer_phone}
+                                </a>
+                            </p>
+                            <p>
+                                <a
+                                    href={`mailto:${appointment.customer_email}`}
+                                    className="break-all hover:text-teal-700 hover:underline"
+                                >
+                                    {appointment.customer_email}
+                                </a>
+                            </p>
+                        </div>
+
+                        {/* A cancelled appointment cannot be cancelled again. */}
+                        {appointment.status === "confirmed" && (
+                            <CancelButton
+                                appointment={appointment}
+                                onCancel={onCancel}
+                            />
+                        )}
+                    </div>
+                </li>
+            ))}
+        </ul>
+    );
+}
+
+function AppointmentsTable({ appointments, onCancel }: AppointmentsViewProps) {
+    return (
+        <div className="-mx-4 hidden overflow-x-auto sm:-mx-8 lg:block">
             <table className="w-full min-w-208 text-left text-sm">
                 <thead className="border-b border-slate-200 text-slate-500">
                     <tr>
-                        <th scope="col" className="px-6 py-3 font-medium sm:px-8">
+                        <th scope="col" className="px-4 py-3 font-medium sm:px-8">
                             Date
                         </th>
                         <th scope="col" className="px-3 py-3 font-medium">
@@ -412,7 +478,7 @@ function AppointmentsTable({ appointments, onCancel }: AppointmentsTableProps) {
                         </th>
                         <th
                             scope="col"
-                            className="px-6 py-3 text-right font-medium sm:px-8"
+                            className="px-4 py-3 text-right font-medium sm:px-8"
                         >
                             Actions
                         </th>
@@ -422,7 +488,7 @@ function AppointmentsTable({ appointments, onCancel }: AppointmentsTableProps) {
                 <tbody className="divide-y divide-slate-100 text-slate-700">
                     {appointments.map((appointment) => (
                         <tr key={appointment.id}>
-                            <td className="whitespace-nowrap px-6 py-3 font-medium text-slate-900 sm:px-8">
+                            <td className="whitespace-nowrap px-4 py-3 font-medium text-slate-900 sm:px-8">
                                 {formatDisplayDate(appointment.appointment_date)}
                             </td>
                             <td className="whitespace-nowrap px-3 py-3 tabular-nums">
@@ -448,17 +514,13 @@ function AppointmentsTable({ appointments, onCancel }: AppointmentsTableProps) {
                             <td className="whitespace-nowrap px-3 py-3">
                                 <StatusBadge status={appointment.status} />
                             </td>
-                            <td className="px-6 py-3 text-right sm:px-8">
+                            <td className="px-4 py-3 text-right sm:px-8">
                                 {/* A cancelled appointment cannot be cancelled again. */}
                                 {appointment.status === "confirmed" ? (
-                                    <button
-                                        type="button"
-                                        onClick={() => onCancel(appointment)}
-                                        aria-label={`Cancel appointment of ${appointment.customer_name} on ${formatDisplayDate(appointment.appointment_date)} at ${appointment.start_time}`}
-                                        className="rounded-lg px-3 py-1.5 text-sm font-semibold text-red-700 hover:bg-red-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-600"
-                                    >
-                                        Cancel
-                                    </button>
+                                    <CancelButton
+                                        appointment={appointment}
+                                        onCancel={onCancel}
+                                    />
                                 ) : (
                                     <span className="px-3 text-slate-400">
                                         <span aria-hidden="true">—</span>
@@ -471,6 +533,26 @@ function AppointmentsTable({ appointments, onCancel }: AppointmentsTableProps) {
                 </tbody>
             </table>
         </div>
+    );
+}
+
+// Shared by the list and the table, so both views label the action the same.
+function CancelButton({
+    appointment,
+    onCancel,
+}: {
+    appointment: Appointment;
+    onCancel: (appointment: Appointment) => void;
+}) {
+    return (
+        <button
+            type="button"
+            onClick={() => onCancel(appointment)}
+            aria-label={`Cancel appointment of ${appointment.customer_name} on ${formatDisplayDate(appointment.appointment_date)} at ${appointment.start_time}`}
+            className="shrink-0 rounded-lg px-4 py-2.5 text-sm font-semibold text-red-700 hover:bg-red-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-600"
+        >
+            Cancel
+        </button>
     );
 }
 
