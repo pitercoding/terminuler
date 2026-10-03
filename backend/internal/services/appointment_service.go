@@ -7,6 +7,7 @@ import (
 	"net/mail"
 	"strings"
 	"time"
+	"unicode"
 	"unicode/utf8"
 
 	"github.com/pitercoding/terminuler/internal/email"
@@ -42,6 +43,40 @@ const (
 	maxCustomerPhoneLength = 50
 	maxCustomerEmailLength = 255
 )
+
+// A phone number has between 6 and 15 digits (the E.164 maximum), so short
+// codes and random text are rejected while local and international formats
+// are accepted.
+const (
+	minPhoneDigits = 6
+	maxPhoneDigits = 15
+)
+
+// hasControlCharacters reports whether value contains control characters,
+// such as line breaks or NUL. A NUL would otherwise reach PostgreSQL, which
+// rejects it in text columns with an internal error instead of a 400.
+func hasControlCharacters(value string) bool {
+	return strings.ContainsFunc(value, unicode.IsControl)
+}
+
+// isValidPhone accepts digits with the separators people commonly type
+// (spaces, dashes, dots, slashes and parentheses) and an optional leading +.
+func isValidPhone(phone string) bool {
+	digits := 0
+
+	for i, r := range phone {
+		switch {
+		case r >= '0' && r <= '9':
+			digits++
+		case r == '+' && i == 0:
+		case strings.ContainsRune(" -./()", r):
+		default:
+			return false
+		}
+	}
+
+	return digits >= minPhoneDigits && digits <= maxPhoneDigits
+}
 
 // ValidationError indicates that the input provided by the client is invalid.
 type ValidationError struct {
@@ -156,12 +191,20 @@ func (s *AppointmentService) newAppointment(
 		return nil, newValidationError("customer name must have at most 255 characters")
 	}
 
+	if hasControlCharacters(customerName) {
+		return nil, newValidationError("customer name contains invalid characters")
+	}
+
 	if customerPhone == "" {
 		return nil, newValidationError("customer phone is required")
 	}
 
 	if utf8.RuneCountInString(customerPhone) > maxCustomerPhoneLength {
 		return nil, newValidationError("customer phone must have at most 50 characters")
+	}
+
+	if !isValidPhone(customerPhone) {
+		return nil, newValidationError("invalid customer phone")
 	}
 
 	if customerEmail == "" {

@@ -913,6 +913,103 @@ func TestValidateCreateAppointment(t *testing.T) {
 			expectError: true,
 		},
 		{
+			// PostgreSQL rejects NUL in text columns with an internal error.
+			name: "customer name with NUL",
+			input: CreateAppointmentInput{
+				AppointmentDate: "2026-09-28",
+				StartTime:       "10:00",
+				EndTime:         "11:00",
+				CustomerName:    "Racha\x00Cuca",
+				CustomerPhone:   "+5511999999999",
+				CustomerEmail:   "rc@exemple.com",
+			},
+			expectError: true,
+		},
+		{
+			name: "customer name with line break",
+			input: CreateAppointmentInput{
+				AppointmentDate: "2026-09-28",
+				StartTime:       "10:00",
+				EndTime:         "11:00",
+				CustomerName:    "Racha\nCuca",
+				CustomerPhone:   "+5511999999999",
+				CustomerEmail:   "rc@exemple.com",
+			},
+			expectError: true,
+		},
+		{
+			name: "customer phone with separators",
+			input: CreateAppointmentInput{
+				AppointmentDate: "2026-09-28",
+				StartTime:       "10:00",
+				EndTime:         "11:00",
+				CustomerName:    "Racha Cuca",
+				CustomerPhone:   "+55 (11) 99999-9999",
+				CustomerEmail:   "rc@exemple.com",
+			},
+			expectError: false,
+		},
+		{
+			name: "customer phone with letters",
+			input: CreateAppointmentInput{
+				AppointmentDate: "2026-09-28",
+				StartTime:       "10:00",
+				EndTime:         "11:00",
+				CustomerName:    "Racha Cuca",
+				CustomerPhone:   "call me maybe",
+				CustomerEmail:   "rc@exemple.com",
+			},
+			expectError: true,
+		},
+		{
+			name: "customer phone with markup",
+			input: CreateAppointmentInput{
+				AppointmentDate: "2026-09-28",
+				StartTime:       "10:00",
+				EndTime:         "11:00",
+				CustomerName:    "Racha Cuca",
+				CustomerPhone:   "<b>5511999999999</b>",
+				CustomerEmail:   "rc@exemple.com",
+			},
+			expectError: true,
+		},
+		{
+			name: "customer phone with too few digits",
+			input: CreateAppointmentInput{
+				AppointmentDate: "2026-09-28",
+				StartTime:       "10:00",
+				EndTime:         "11:00",
+				CustomerName:    "Racha Cuca",
+				CustomerPhone:   "12345",
+				CustomerEmail:   "rc@exemple.com",
+			},
+			expectError: true,
+		},
+		{
+			name: "customer phone with too many digits",
+			input: CreateAppointmentInput{
+				AppointmentDate: "2026-09-28",
+				StartTime:       "10:00",
+				EndTime:         "11:00",
+				CustomerName:    "Racha Cuca",
+				CustomerPhone:   "1234567890123456",
+				CustomerEmail:   "rc@exemple.com",
+			},
+			expectError: true,
+		},
+		{
+			name: "customer phone with plus in the middle",
+			input: CreateAppointmentInput{
+				AppointmentDate: "2026-09-28",
+				StartTime:       "10:00",
+				EndTime:         "11:00",
+				CustomerName:    "Racha Cuca",
+				CustomerPhone:   "5511+999999999",
+				CustomerEmail:   "rc@exemple.com",
+			},
+			expectError: true,
+		},
+		{
 			name: "customer email too long",
 			input: CreateAppointmentInput{
 				AppointmentDate: "2026-09-28",
