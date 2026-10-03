@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"log"
+	"mime"
 	"net/http"
 	"time"
 
@@ -105,6 +106,17 @@ func writeServiceError(
 	}
 }
 
+// isJSONContentType reports whether contentType is application/json, with
+// or without parameters such as charset. Browsers can send a cross-site POST
+// without a CORS preflight only as text/plain, a form or with no content
+// type at all, so requiring JSON keeps other sites from booking through the
+// browsers of their visitors.
+func isJSONContentType(contentType string) bool {
+	mediaType, _, err := mime.ParseMediaType(contentType)
+
+	return err == nil && mediaType == "application/json"
+}
+
 // writeDecodeError responds to a request body that could not be decoded. err may be nil when the body holds more than one JSON value.
 func writeDecodeError(
 	w http.ResponseWriter,
@@ -168,6 +180,15 @@ func (h *AppointmentHandler) CreateAppointment(
 	w http.ResponseWriter,
 	r *http.Request,
 ) {
+	if !isJSONContentType(r.Header.Get("Content-Type")) {
+		writeError(
+			w,
+			http.StatusUnsupportedMediaType,
+			"content type must be application/json",
+		)
+		return
+	}
+
 	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodyBytes)
 
 	var request createAppointmentRequest

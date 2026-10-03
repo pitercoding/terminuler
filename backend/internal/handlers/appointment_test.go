@@ -105,6 +105,75 @@ func assertErrorResponse(
 	}
 }
 
+// newCreateRequest builds a POST /appointments request with a JSON body, as
+// the Next.js proxy sends it.
+func newCreateRequest(body string) *http.Request {
+	request := httptest.NewRequest(
+		http.MethodPost,
+		"/appointments",
+		strings.NewReader(body),
+	)
+	request.Header.Set("Content-Type", "application/json")
+
+	return request
+}
+
+// Cross-site POSTs that need no CORS preflight carry text/plain, a form
+// content type or none at all; all of them must be rejected before the body
+// is read or anything is stored.
+func TestCreateAppointment_RequiresJSONContentType(t *testing.T) {
+	body := `{
+		"appointment_date": "2026-09-28",
+		"start_time": "10:00",
+		"end_time": "11:00",
+		"customer_name": "Racha Cuca",
+		"customer_phone": "+5511999999999",
+		"customer_email": "rc@exemple.com"
+	}`
+
+	tests := []struct {
+		contentType    string
+		expectedStatus int
+	}{
+		{"", http.StatusUnsupportedMediaType},
+		{"text/plain;charset=UTF-8", http.StatusUnsupportedMediaType},
+		{"application/x-www-form-urlencoded", http.StatusUnsupportedMediaType},
+		{"multipart/form-data; boundary=x", http.StatusUnsupportedMediaType},
+		{"application/json", http.StatusCreated},
+		{"application/json; charset=utf-8", http.StatusCreated},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.contentType, func(t *testing.T) {
+			repository := &mockAppointmentRepository{}
+
+			handler := NewAppointmentHandler(
+				services.NewAppointmentService(repository, fixedClock),
+			)
+
+			request := newCreateRequest(body)
+			request.Header.Set("Content-Type", tt.contentType)
+
+			recorder := httptest.NewRecorder()
+
+			handler.CreateAppointment(recorder, request)
+
+			if recorder.Code != tt.expectedStatus {
+				t.Fatalf(
+					"expected status %d, got %d (%s)",
+					tt.expectedStatus,
+					recorder.Code,
+					recorder.Body.String(),
+				)
+			}
+
+			if tt.expectedStatus == http.StatusUnsupportedMediaType {
+				assertErrorResponse(t, recorder, "content type must be application/json")
+			}
+		})
+	}
+}
+
 func TestCreateAppointment_Success(t *testing.T) {
 	repository := &mockAppointmentRepository{}
 
@@ -121,11 +190,7 @@ func TestCreateAppointment_Success(t *testing.T) {
 		"customer_email": "rc@exemple.com"
 	}`
 
-	request := httptest.NewRequest(
-		http.MethodPost,
-		"/appointments",
-		strings.NewReader(body),
-	)
+	request := newCreateRequest(body)
 
 	recorder := httptest.NewRecorder()
 
@@ -178,11 +243,7 @@ func TestCreateAppointment_InvalidJSON(t *testing.T) {
 
 	body := `{"appointment_date":`
 
-	request := httptest.NewRequest(
-		http.MethodPost,
-		"/appointments",
-		strings.NewReader(body),
-	)
+	request := newCreateRequest(body)
 
 	recorder := httptest.NewRecorder()
 
@@ -218,11 +279,7 @@ func TestCreateAppointment_ValidationError(t *testing.T) {
 		"customer_email": "rc@exemple.com"
 	}`
 
-	request := httptest.NewRequest(
-		http.MethodPost,
-		"/appointments",
-		strings.NewReader(body),
-	)
+	request := newCreateRequest(body)
 
 	recorder := httptest.NewRecorder()
 
@@ -260,11 +317,7 @@ func TestCreateAppointment_Conflict(t *testing.T) {
 		"customer_email": "rc@exemple.com"
 	}`
 
-	request := httptest.NewRequest(
-		http.MethodPost,
-		"/appointments",
-		strings.NewReader(body),
-	)
+	request := newCreateRequest(body)
 
 	recorder := httptest.NewRecorder()
 
@@ -302,11 +355,7 @@ func TestCreateAppointment_RepositoryError(t *testing.T) {
 		"customer_email": "rc@exemple.com"
 	}`
 
-	request := httptest.NewRequest(
-		http.MethodPost,
-		"/appointments",
-		strings.NewReader(body),
-	)
+	request := newCreateRequest(body)
 
 	recorder := httptest.NewRecorder()
 
@@ -352,11 +401,7 @@ func TestCreateAppointment_ValidationErrorMessage(t *testing.T) {
 		"customer_email": "rc@exemple.com"
 	}`
 
-	request := httptest.NewRequest(
-		http.MethodPost,
-		"/appointments",
-		strings.NewReader(body),
-	)
+	request := newCreateRequest(body)
 
 	recorder := httptest.NewRecorder()
 
@@ -387,11 +432,7 @@ func TestCreateAppointment_BodyTooLarge(t *testing.T) {
 		strings.Repeat("a", maxRequestBodyBytes) +
 		`"}`
 
-	request := httptest.NewRequest(
-		http.MethodPost,
-		"/appointments",
-		strings.NewReader(body),
-	)
+	request := newCreateRequest(body)
 
 	recorder := httptest.NewRecorder()
 
@@ -469,11 +510,7 @@ func TestCreateAppointment_RejectsMalformedBodies(t *testing.T) {
 
 			handler := NewAppointmentHandler(service)
 
-			request := httptest.NewRequest(
-				http.MethodPost,
-				"/appointments",
-				strings.NewReader(tt.body),
-			)
+			request := newCreateRequest(tt.body)
 
 			recorder := httptest.NewRecorder()
 
@@ -511,11 +548,7 @@ func TestCreateAppointment_AllowsTrailingWhitespace(t *testing.T) {
 		"customer_email": "rc@exemple.com"
 	}` + "\n\n"
 
-	request := httptest.NewRequest(
-		http.MethodPost,
-		"/appointments",
-		strings.NewReader(body),
-	)
+	request := newCreateRequest(body)
 
 	recorder := httptest.NewRecorder()
 
@@ -550,11 +583,7 @@ func TestCreateAppointment_NormalizesTimesInResponse(t *testing.T) {
 		"customer_email": "rc@exemple.com"
 	}`
 
-	request := httptest.NewRequest(
-		http.MethodPost,
-		"/appointments",
-		strings.NewReader(body),
-	)
+	request := newCreateRequest(body)
 
 	recorder := httptest.NewRecorder()
 
@@ -603,11 +632,7 @@ func TestCreateAppointment_BeyondBookingHorizon(t *testing.T) {
 		"customer_email": "rc@exemple.com"
 	}`
 
-	request := httptest.NewRequest(
-		http.MethodPost,
-		"/appointments",
-		strings.NewReader(body),
-	)
+	request := newCreateRequest(body)
 
 	recorder := httptest.NewRecorder()
 
@@ -864,11 +889,7 @@ func TestCreateAppointment_PastDate(t *testing.T) {
 		"customer_email": "rc@exemple.com"
 	}`
 
-	request := httptest.NewRequest(
-		http.MethodPost,
-		"/appointments",
-		strings.NewReader(body),
-	)
+	request := newCreateRequest(body)
 
 	recorder := httptest.NewRecorder()
 
