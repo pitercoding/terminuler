@@ -54,10 +54,18 @@ function matchesFilters(
 }
 
 /**
- * Returns the message shown when the appointments cannot be loaded. A 403
- * means the user is signed in but is not the admin, so retrying is useless.
+ * Returns the message shown when the appointments cannot be loaded. A 401
+ * means the session ended and a 403 that the user is not the admin; in
+ * both cases retrying fails again, so no retry is offered.
  */
 function loadFailure(err: unknown): { message: string; canRetry: boolean } {
+    if (err instanceof AppointmentApiError && err.status === 401) {
+        return {
+            message: "Your session has expired. Reload the page to sign in again.",
+            canRetry: false,
+        };
+    }
+
     if (err instanceof AppointmentApiError && err.status === 403) {
         return {
             message: "Your account does not have access to the admin dashboard.",
@@ -253,7 +261,9 @@ export default function AdminPage() {
 
                 <div className="mt-6">
                     {state.status === "loading" && (
-                        <p className="text-sm text-slate-500">Loading appointments…</p>
+                        <p role="status" className="text-sm text-slate-500">
+                            Loading appointments…
+                        </p>
                     )}
 
                     {state.status === "error" && (
@@ -286,7 +296,7 @@ export default function AdminPage() {
                                             onChange={(event) =>
                                                 setSearch(event.target.value)
                                             }
-                                            placeholder="Search appointments..."
+                                            placeholder="Search by name, email or phone"
                                             autoComplete="off"
                                             className={inputClassName}
                                         />

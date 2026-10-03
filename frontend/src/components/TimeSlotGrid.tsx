@@ -80,7 +80,7 @@ export function TimeSlotGridSkeleton() {
     <div className="mt-8" role="status">
       <Heading />
 
-      <span className="sr-only">Loading available times...</span>
+      <span className="sr-only">Loading available times…</span>
 
       <div aria-hidden="true" className={gridClassName}>
         {Array.from({ length: 8 }, (_, index) => (

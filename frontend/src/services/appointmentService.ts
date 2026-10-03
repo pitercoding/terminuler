@@ -117,6 +117,7 @@ export async function createAppointment(
 
     return data as Appointment;
 }
+
 /**
  * Returns the upcoming appointments, from today onwards, both confirmed and
  * cancelled. Only the admin can list them: other users get a 401 or 403

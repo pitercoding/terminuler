@@ -1,4 +1,12 @@
 import { auth } from "@clerk/nextjs/server";
+import type { Metadata } from "next";
+
+// Set here because the page is a Client Component, which cannot export
+// metadata. The title is also sent with the sign-in redirect, so it does
+// not repeat the dashboard heading.
+export const metadata: Metadata = {
+    title: "Admin",
+};
 
 /**
  * Protects every page under /admin on the server: a signed-out visitor is

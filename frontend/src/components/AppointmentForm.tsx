@@ -142,7 +142,7 @@ export function AppointmentForm({
             type="submit"
             className="w-full rounded-lg bg-teal-700 px-4 py-3 font-semibold text-white shadow-sm transition-colors hover:bg-teal-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-600 disabled:cursor-not-allowed disabled:opacity-60"
           >
-            {isSubmitting ? "Confirming appointment..." : "Confirm appointment"}
+            {isSubmitting ? "Confirming appointment…" : "Confirm appointment"}
           </button>
         </fieldset>
       </form>

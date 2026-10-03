@@ -9,7 +9,12 @@ const geistSans = Geist({
 });
 
 export const metadata: Metadata = {
-  title: "Terminuler — Book an Appointment",
+  // Pages that set their own title, such as the admin dashboard, get the
+  // product name appended.
+  title: {
+    default: "Terminuler — Book an Appointment",
+    template: "%s — Terminuler",
+  },
   description: "Simple and convenient online appointment booking.",
 };
 
