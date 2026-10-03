@@ -1,7 +1,6 @@
 import { auth } from "@clerk/nextjs/server";
-import { NextResponse } from "next/server";
 
-import { proxyToAPI } from "@/lib/apiProxy";
+import { proxyToAPI, unauthorized } from "@/lib/apiProxy";
 
 /**
  * Forwards the request to the admin API with the Clerk session token of the
@@ -14,10 +13,7 @@ export async function GET() {
     const token = await getToken();
 
     if (!token) {
-        return NextResponse.json(
-            { error: "unauthorized" },
-            { status: 401 },
-        );
+        return unauthorized();
     }
 
     return proxyToAPI("/admin/appointments", {

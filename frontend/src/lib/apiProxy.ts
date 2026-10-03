@@ -137,6 +137,17 @@ export function isJSONRequest(request: Request): boolean {
     return contentType.split(";")[0].trim().toLowerCase() === "application/json";
 }
 
+/**
+ * The answer of the admin route handlers when the request has no Clerk
+ * session, so there is no token to forward to the Go API.
+ */
+export function unauthorized(): NextResponse {
+    return NextResponse.json(
+        { error: "unauthorized" },
+        { status: 401, headers: noStore() },
+    );
+}
+
 export function unsupportedMediaType(): NextResponse {
     return NextResponse.json(
         { error: "content type must be application/json" },

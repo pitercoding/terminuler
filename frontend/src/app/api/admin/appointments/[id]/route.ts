@@ -1,7 +1,6 @@
 import { auth } from "@clerk/nextjs/server";
-import { NextResponse } from "next/server";
 
-import { proxyToAPI } from "@/lib/apiProxy";
+import { proxyToAPI, unauthorized } from "@/lib/apiProxy";
 
 /**
  * Cancels an appointment through the admin API with the Clerk session token
@@ -17,10 +16,7 @@ export async function DELETE(
     const token = await getToken();
 
     if (!token) {
-        return NextResponse.json(
-            { error: "unauthorized" },
-            { status: 401 },
-        );
+        return unauthorized();
     }
 
     const { id } = await params;
