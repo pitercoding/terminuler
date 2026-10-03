@@ -41,12 +41,17 @@ const bookingErrorMessage =
 
 /**
  * Returns the message shown when a booking fails. Validation errors (400)
- * explain what to fix, so the API message is shown; anything else gets a
- * generic message instead of technical details.
+ * explain what to fix, so the API message is shown; a rate limit (429) asks
+ * to wait, since retrying at once fails again; anything else gets a generic
+ * message instead of technical details.
  */
 function bookingFailureMessage(err: unknown): string {
   if (err instanceof AppointmentApiError && err.status === 400) {
     return `${err.message.charAt(0).toUpperCase()}${err.message.slice(1)}.`;
+  }
+
+  if (err instanceof AppointmentApiError && err.status === 429) {
+    return "Too many booking attempts. Please wait a minute and try again.";
   }
 
   return bookingErrorMessage;
