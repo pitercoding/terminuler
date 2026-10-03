@@ -1,9 +1,7 @@
 import { auth } from "@clerk/nextjs/server";
 import { NextResponse } from "next/server";
 
-import { apiUnavailable, forwardJSON } from "@/lib/apiProxy";
-
-const API_URL = process.env.API_URL ?? "http://localhost:8080";
+import { proxyToAPI } from "@/lib/apiProxy";
 
 /**
  * Forwards the request to the admin API with the Clerk session token of the
@@ -22,16 +20,7 @@ export async function GET() {
         );
     }
 
-    let response: Response;
-
-    try {
-        response = await fetch(`${API_URL}/admin/appointments`, {
-            headers: { Authorization: `Bearer ${token}` },
-            cache: "no-store",
-        });
-    } catch {
-        return apiUnavailable();
-    }
-
-    return forwardJSON(response);
+    return proxyToAPI("/admin/appointments", {
+        headers: { Authorization: `Bearer ${token}` },
+    });
 }

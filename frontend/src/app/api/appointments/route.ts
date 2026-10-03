@@ -1,13 +1,16 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest } from "next/server";
 
-const API_URL = process.env.API_URL ?? "http://localhost:8080";
+import {
+    isJSONRequest,
+    proxyToAPI,
+    unsupportedMediaType,
+} from "@/lib/apiProxy";
 
 /**
  * Returns the IP of the client that called this proxy, or null when it is
  * unknown. The last X-Forwarded-For entry is the one added by the closest
  * hop (the hosting platform, a reverse proxy or Next.js itself), while
- * earlier entries can be sent by the client and are not trusted. The Go API
- * only accepts the result when the connection comes from TRUSTED_PROXIES.
+ * earlier entries can be sent by the client and are not trusted.
  */
 function clientIP(request: NextRequest): string | null {
     const forwardedFor = request.headers.get("x-forwarded-for");
@@ -17,36 +20,38 @@ function clientIP(request: NextRequest): string | null {
     return ip || null;
 }
 
+/**
+ * Forwards the booking to the Go API, which validates the body. The client
+ * IP goes in X-Real-IP for the rate limit; the API only believes it when the
+ * request comes from TRUSTED_PROXIES or carries API_PROXY_SECRET, a
+ * server-only variable that never reaches the browser.
+ */
 export async function POST(request: NextRequest) {
-    try {
-        const body = await request.json();
-
-        const headers = new Headers({ "Content-Type": "application/json" });
-
-        const ip = clientIP(request);
-
-        if (ip) {
-            headers.set("X-Real-IP", ip);
-        }
-
-        const response = await fetch(`${API_URL}/appointments`, {
-            method: "POST",
-            headers,
-            body: JSON.stringify(body),
-        });
-
-        const data = await response.json();
-
-        const retryAfter = response.headers.get("Retry-After");
-
-        return NextResponse.json(data, {
-            status: response.status,
-            headers: retryAfter ? { "Retry-After": retryAfter } : undefined,
-        });
-    } catch {
-        return NextResponse.json(
-            { error: "failed to connect to appointment API" },
-            { status: 502 },
-        );
+    if (!isJSONRequest(request)) {
+        return unsupportedMediaType();
     }
+
+    const headers = new Headers({ "Content-Type": "application/json" });
+
+    const ip = clientIP(request);
+
+    if (ip) {
+        headers.set("X-Real-IP", ip);
+    }
+
+    const proxySecret = process.env.API_PROXY_SECRET;
+
+    if (proxySecret) {
+        headers.set("X-Proxy-Secret", proxySecret);
+    }
+
+    // Forwarded as received: the API rejects invalid JSON with a 400, which
+    // re-encoding it here would turn into a proxy error.
+    const body = await request.text();
+
+    return proxyToAPI("/appointments", {
+        method: "POST",
+        headers,
+        body,
+    });
 }

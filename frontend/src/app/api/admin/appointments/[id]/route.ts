@@ -1,9 +1,7 @@
 import { auth } from "@clerk/nextjs/server";
 import { NextResponse } from "next/server";
 
-import { apiUnavailable, forwardJSON } from "@/lib/apiProxy";
-
-const API_URL = process.env.API_URL ?? "http://localhost:8080";
+import { proxyToAPI } from "@/lib/apiProxy";
 
 /**
  * Cancels an appointment through the admin API with the Clerk session token
@@ -27,25 +25,8 @@ export async function DELETE(
 
     const { id } = await params;
 
-    let response: Response;
-
-    try {
-        response = await fetch(
-            `${API_URL}/admin/appointments/${encodeURIComponent(id)}`,
-            {
-                method: "DELETE",
-                headers: { Authorization: `Bearer ${token}` },
-                cache: "no-store",
-            },
-        );
-    } catch {
-        return apiUnavailable();
-    }
-
-    // A successful cancellation has no body to forward.
-    if (response.status === 204) {
-        return new NextResponse(null, { status: 204 });
-    }
-
-    return forwardJSON(response);
+    return proxyToAPI(`/admin/appointments/${encodeURIComponent(id)}`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${token}` },
+    });
 }
