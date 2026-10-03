@@ -202,12 +202,6 @@ func TestRoutes(t *testing.T) {
 			expectedAllow:  "GET, HEAD",
 		},
 		{
-			name:           "admin session requires admin",
-			method:         http.MethodGet,
-			path:           "/admin/session",
-			expectedStatus: http.StatusForbidden,
-		},
-		{
 			name:           "admin appointments requires admin",
 			method:         http.MethodGet,
 			path:           "/admin/appointments",
@@ -454,7 +448,6 @@ func TestRoutes_AdminRejectsUnverifiableTokenWithJSON(t *testing.T) {
 		method string
 		path   string
 	}{
-		{http.MethodGet, "/admin/session"},
 		{http.MethodGet, "/admin/appointments"},
 		{http.MethodDelete, "/admin/appointments/1"},
 	}

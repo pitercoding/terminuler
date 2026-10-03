@@ -16,16 +16,19 @@ const (
 	AppointmentStatusCancelled AppointmentStatus = "cancelled"
 )
 
+// Appointment is a row of the appointments table. It is never encoded to
+// JSON directly: the handlers convert it to their own response type, which
+// formats the date as YYYY-MM-DD.
 type Appointment struct {
-	ID              int64             `json:"id"`
-	AppointmentDate time.Time         `json:"appointment_date"`
-	StartTime       string            `json:"start_time"`
-	EndTime         string            `json:"end_time"`
-	CustomerName    string            `json:"customer_name"`
-	CustomerPhone   string            `json:"customer_phone"`
-	CustomerEmail   string            `json:"customer_email"`
-	Status          AppointmentStatus `json:"status"`
-	CreatedAt       time.Time         `json:"created_at"`
+	ID              int64
+	AppointmentDate time.Time
+	StartTime       string
+	EndTime         string
+	CustomerName    string
+	CustomerPhone   string
+	CustomerEmail   string
+	Status          AppointmentStatus
+	CreatedAt       time.Time
 	// CancelledAt is nil unless Status is AppointmentStatusCancelled.
-	CancelledAt *time.Time `json:"cancelled_at"`
+	CancelledAt *time.Time
 }

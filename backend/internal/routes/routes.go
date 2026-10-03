@@ -37,13 +37,6 @@ func RegisterRoutes(
 	)
 
 	mux.Handle(
-		"GET /admin/session",
-		requireAdmin(
-			http.HandlerFunc(handlers.AdminSessionHandler),
-		),
-	)
-
-	mux.Handle(
 		"GET /admin/appointments",
 		requireAdmin(
 			http.HandlerFunc(appointmentHandler.ListAppointments),
