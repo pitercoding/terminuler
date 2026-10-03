@@ -13,7 +13,7 @@ func newTestHandler(limit int, clock *fakeClock) http.Handler {
 		NewLimiter(limit, time.Minute, clock.now),
 		NewClientIPResolver([]netip.Prefix{
 			netip.MustParsePrefix("127.0.0.1/32"),
-		}),
+		}, ""),
 	)
 
 	return middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

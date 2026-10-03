@@ -1,24 +1,36 @@
 package ratelimit
 
 import (
+	"crypto/subtle"
 	"net"
 	"net/http"
 	"net/netip"
 	"strings"
 )
 
+// ProxySecretHeader carries the secret the Next.js proxy shares with the API.
+const ProxySecretHeader = "X-Proxy-Secret"
+
 // ClientIPResolver finds the IP of the client behind a request. The API is
 // called through the Next.js proxy, so the connection comes from the proxy
 // and the client IP travels in the X-Real-IP header. Anyone can send that
-// header, so it is only trusted when the connection comes from one of the
-// trusted proxy networks.
+// header, so it is only trusted when the request proves it comes from the
+// proxy: either the connection comes from one of the trusted proxy networks
+// or the request carries the shared proxy secret.
 type ClientIPResolver struct {
 	trustedProxies []netip.Prefix
+	proxySecret    []byte
 }
 
-func NewClientIPResolver(trustedProxies []netip.Prefix) *ClientIPResolver {
+// NewClientIPResolver creates a resolver. An empty proxySecret disables the
+// secret check, leaving only trustedProxies.
+func NewClientIPResolver(
+	trustedProxies []netip.Prefix,
+	proxySecret string,
+) *ClientIPResolver {
 	return &ClientIPResolver{
 		trustedProxies: trustedProxies,
+		proxySecret:    []byte(proxySecret),
 	}
 }
 
@@ -30,7 +42,7 @@ func (c *ClientIPResolver) ClientIP(r *http.Request) (netip.Addr, bool) {
 		return netip.Addr{}, false
 	}
 
-	if !c.isTrustedProxy(remote) {
+	if !c.isTrustedProxy(remote) && !c.hasProxySecret(r) {
 		return remote, true
 	}
 
@@ -54,6 +66,19 @@ func (c *ClientIPResolver) isTrustedProxy(addr netip.Addr) bool {
 	}
 
 	return false
+}
+
+// hasProxySecret compares in constant time, so the response time does not
+// reveal how much of a guessed secret is right.
+func (c *ClientIPResolver) hasProxySecret(r *http.Request) bool {
+	if len(c.proxySecret) == 0 {
+		return false
+	}
+
+	return subtle.ConstantTimeCompare(
+		[]byte(r.Header.Get(ProxySecretHeader)),
+		c.proxySecret,
+	) == 1
 }
 
 // remoteAddr parses the IP of the connection, dropping the port and turning

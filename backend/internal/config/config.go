@@ -178,6 +178,29 @@ func TrustedProxies() ([]netip.Prefix, error) {
 	return prefixes, nil
 }
 
+// minProxySecretLength keeps API_PROXY_SECRET long enough that it cannot be
+// guessed: openssl rand -hex 32 produces 64 characters.
+const minProxySecretLength = 32
+
+// ProxySecret returns the secret the Next.js proxy sends in the
+// X-Proxy-Secret header to be allowed to report the client IP
+// (API_PROXY_SECRET). In production the proxy runs on Vercel, whose
+// outgoing IPs are not fixed and cannot be listed in TRUSTED_PROXIES, so the
+// secret is how the API tells the proxy from anyone else on the internet.
+// It is optional: when empty, only TRUSTED_PROXIES is used.
+func ProxySecret() (string, error) {
+	secret := os.Getenv("API_PROXY_SECRET")
+
+	if secret != "" && len(secret) < minProxySecretLength {
+		return "", fmt.Errorf(
+			"API_PROXY_SECRET must have at least %d characters",
+			minProxySecretLength,
+		)
+	}
+
+	return secret, nil
+}
+
 // parsePrefix accepts a CIDR or a single IP, which becomes a prefix that
 // matches only that address.
 func parsePrefix(value string) (netip.Prefix, error) {

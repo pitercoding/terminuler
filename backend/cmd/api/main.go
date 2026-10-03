@@ -18,6 +18,7 @@ import (
 	"github.com/pitercoding/terminuler/internal/database"
 	"github.com/pitercoding/terminuler/internal/email"
 	"github.com/pitercoding/terminuler/internal/handlers"
+	"github.com/pitercoding/terminuler/internal/middleware"
 	"github.com/pitercoding/terminuler/internal/ratelimit"
 	"github.com/pitercoding/terminuler/internal/repositories"
 	"github.com/pitercoding/terminuler/internal/routes"
@@ -101,6 +102,15 @@ func run() error {
 		return err
 	}
 
+	proxySecret, err := config.ProxySecret()
+	if err != nil {
+		return err
+	}
+
+	if len(trustedProxies) == 0 && proxySecret == "" {
+		log.Println("TRUSTED_PROXIES and API_PROXY_SECRET are not set: X-Real-IP is ignored, so every request through the proxy shares one rate limit")
+	}
+
 	mux := http.NewServeMux()
 
 	appointmentRepository := repositories.NewAppointmentRepository(db)
@@ -123,11 +133,12 @@ func run() error {
 			rateLimitWindow,
 			time.Now,
 		),
-		ratelimit.NewClientIPResolver(trustedProxies),
+		ratelimit.NewClientIPResolver(trustedProxies, proxySecret),
 	)
 
 	routes.RegisterRoutes(
 		mux,
+		handlers.NewHealthHandler(db),
 		appointmentHandler,
 		createAppointmentLimit,
 		auth.AdminMiddleware(adminClerkUserID, handlers.WriteError),
@@ -137,7 +148,7 @@ func run() error {
 
 	server := &http.Server{
 		Addr:              ":" + port,
-		Handler:           mux,
+		Handler:           middleware.AccessLog(nil, middleware.SecurityHeaders(mux)),
 		ReadHeaderTimeout: readHeaderTimeout,
 		ReadTimeout:       readTimeout,
 		WriteTimeout:      writeTimeout,

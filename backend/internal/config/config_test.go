@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -308,5 +309,40 @@ func TestTrustedProxies(t *testing.T) {
 		if _, err := TrustedProxies(); err == nil {
 			t.Fatalf("expected error for TRUSTED_PROXIES %q", invalid)
 		}
+	}
+}
+
+func TestProxySecret(t *testing.T) {
+	tests := []struct {
+		name        string
+		value       string
+		expectError bool
+	}{
+		{name: "not set", value: ""},
+		{name: "long enough", value: strings.Repeat("a", 64)},
+		{name: "too short", value: "short-secret", expectError: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("API_PROXY_SECRET", tt.value)
+
+			secret, err := ProxySecret()
+
+			if tt.expectError {
+				if err == nil {
+					t.Fatal("expected an error, got nil")
+				}
+				return
+			}
+
+			if err != nil {
+				t.Fatalf("expected no error, got %v", err)
+			}
+
+			if secret != tt.value {
+				t.Fatalf("expected %q, got %q", tt.value, secret)
+			}
+		})
 	}
 }

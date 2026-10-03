@@ -55,6 +55,13 @@ func (s *stubAppointmentRepository) Cancel(
 	return &models.Appointment{ID: id}, nil
 }
 
+// stubPinger stands in for a reachable database in the health check.
+type stubPinger struct{}
+
+func (stubPinger) PingContext(ctx context.Context) error {
+	return nil
+}
+
 func newTestMux(
 	createAppointmentLimit func(http.Handler) http.Handler,
 ) *http.ServeMux {
@@ -76,6 +83,7 @@ func newTestMuxWithAdmin(
 
 	RegisterRoutes(
 		mux,
+		handlers.NewHealthHandler(stubPinger{}),
 		handlers.NewAppointmentHandler(service),
 		createAppointmentLimit,
 		requireAdmin,
@@ -256,6 +264,7 @@ func TestRoutes(t *testing.T) {
 				tt.path,
 				strings.NewReader(tt.body),
 			)
+			request.Header.Set("Content-Type", "application/json")
 
 			recorder := httptest.NewRecorder()
 

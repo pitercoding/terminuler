@@ -17,11 +17,12 @@ import (
 // the admin can reach them.
 func RegisterRoutes(
 	mux *http.ServeMux,
+	healthHandler http.Handler,
 	appointmentHandler *handlers.AppointmentHandler,
 	createAppointmentLimit func(http.Handler) http.Handler,
 	requireAdmin func(http.Handler) http.Handler,
 ) {
-	mux.HandleFunc("GET /health", handlers.HealthHandler)
+	mux.Handle("GET /health", healthHandler)
 
 	mux.HandleFunc(
 		"GET /appointments/availability",

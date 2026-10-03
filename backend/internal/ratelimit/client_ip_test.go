@@ -85,7 +85,7 @@ func TestClientIPResolver(t *testing.T) {
 				request.Header.Set("X-Real-IP", tt.realIP)
 			}
 
-			addr, ok := NewClientIPResolver(tt.trusted).ClientIP(request)
+			addr, ok := NewClientIPResolver(tt.trusted, "").ClientIP(request)
 			if !ok {
 				t.Fatal("expected client IP to be resolved")
 			}
@@ -101,7 +101,64 @@ func TestClientIPResolver_InvalidRemoteAddr(t *testing.T) {
 	request := httptest.NewRequest("POST", "/appointments", nil)
 	request.RemoteAddr = "not-an-ip"
 
-	if _, ok := NewClientIPResolver(nil).ClientIP(request); ok {
+	if _, ok := NewClientIPResolver(nil, "").ClientIP(request); ok {
 		t.Fatal("expected invalid remote address not to resolve")
+	}
+}
+
+// In production the proxy connects from addresses that cannot be listed in
+// TRUSTED_PROXIES, so it proves itself with the shared secret instead.
+func TestClientIPResolver_ProxySecret(t *testing.T) {
+	const secret = "0123456789abcdef0123456789abcdef"
+
+	tests := []struct {
+		name        string
+		proxySecret string
+		sentSecret  string
+		expected    string
+	}{
+		{
+			name:        "matching secret uses header",
+			proxySecret: secret,
+			sentSecret:  secret,
+			expected:    "203.0.113.7",
+		},
+		{
+			name:        "wrong secret ignores header",
+			proxySecret: secret,
+			sentSecret:  "0123456789abcdef0123456789abcdeX",
+			expected:    "198.51.100.1",
+		},
+		{
+			name:        "missing secret ignores header",
+			proxySecret: secret,
+			expected:    "198.51.100.1",
+		},
+		{
+			// An unset secret must never match an empty header.
+			name:     "secret disabled ignores header",
+			expected: "198.51.100.1",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			request := httptest.NewRequest("POST", "/appointments", nil)
+			request.RemoteAddr = "198.51.100.1:50000"
+			request.Header.Set("X-Real-IP", "203.0.113.7")
+
+			if tt.sentSecret != "" {
+				request.Header.Set(ProxySecretHeader, tt.sentSecret)
+			}
+
+			addr, ok := NewClientIPResolver(nil, tt.proxySecret).ClientIP(request)
+			if !ok {
+				t.Fatal("expected client IP to be resolved")
+			}
+
+			if addr.String() != tt.expected {
+				t.Fatalf("expected %s, got %s", tt.expected, addr)
+			}
+		})
 	}
 }
